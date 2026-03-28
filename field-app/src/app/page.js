@@ -1,42 +1,6 @@
 "use client";
 import { useState, useEffect, useRef } from "react";
 
-// ── Module-level bullet cache — lives outside React, never wiped ──────────────
-// Keys are headlines, values are { status: "loading"|"done"|"error", bullets: [] }
-const CACHE = {};
-const LISTENERS = {}; // headline -> Set of setState functions
-
-function subscribeBullets(headline, setState) {
-  if (!LISTENERS[headline]) LISTENERS[headline] = new Set();
-  LISTENERS[headline].add(setState);
-  return () => LISTENERS[headline].delete(setState);
-}
-
-function notifyListeners(headline) {
-  if (LISTENERS[headline]) {
-    LISTENERS[headline].forEach(fn => fn(CACHE[headline]));
-  }
-}
-
-async function fetchBulletsForHeadline(headline, isSports) {
-  if (CACHE[headline]) return; // already fetching or done
-  CACHE[headline] = { status: "loading", bullets: [] };
-  notifyListeners(headline);
-  try {
-    const res = await fetch("/api/analyze", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ headline, type: isSports ? "sports" : "world" }),
-    });
-    const data = await res.json();
-    CACHE[headline] = { status: "done", bullets: data.bullets || [] };
-  } catch {
-    CACHE[headline] = { status: "error", bullets: [] };
-  }
-  notifyListeners(headline);
-}
-
-// ── Design ────────────────────────────────────────────────────
 const C = {
   bg: "#07070F", surface: "#0D0D1A", card: "#111120",
   border: "#1C1C2E", borderBright: "#28284A",
@@ -49,11 +13,11 @@ const Fb = `'Inter', system-ui, sans-serif`;
 const Fd = `'Bebas Neue', 'Arial Black', sans-serif`;
 
 const LEAGUES = [
-  { id: "nba", name: "NBA", emoji: "🏀", color: "#E8112D" },
-  { id: "nfl", name: "NFL", emoji: "🏈", color: "#4A90D9" },
-  { id: "mlb", name: "MLB", emoji: "⚾", color: "#00A651" },
-  { id: "nhl", name: "NHL", emoji: "🏒", color: "#A8B8CC" },
-  { id: "soccer", name: "Soccer", emoji: "⚽", color: "#00D4AA" },
+  { id: "nba",     name: "NBA",     emoji: "🏀", color: "#E8112D" },
+  { id: "nfl",     name: "NFL",     emoji: "🏈", color: "#4A90D9" },
+  { id: "mlb",     name: "MLB",     emoji: "⚾", color: "#00A651" },
+  { id: "nhl",     name: "NHL",     emoji: "🏒", color: "#A8B8CC" },
+  { id: "soccer",  name: "Soccer",  emoji: "⚽", color: "#00D4AA" },
   { id: "college", name: "College", emoji: "🎓", color: "#FF6B2B" },
 ];
 const NEWS_CATS = [
@@ -71,12 +35,6 @@ const TYPE_CFG = {
   news:      { label: "NEWS",    color: "#9B8FFF" },
   award:     { label: "AWARD",   color: "#FFD60A" },
 };
-const BULLET_META = [
-  { tag: "WHAT",    color: C.text    },
-  { tag: "WHY",     color: C.orange  },
-  { tag: "CONTEXT", color: C.textMid },
-  { tag: "IMPACT",  color: C.green   },
-];
 
 // ── Tiny UI ───────────────────────────────────────────────────
 function LiveDot() {
@@ -101,6 +59,29 @@ function SectionHead({ label, color }) {
     <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
       <div style={{ width: 3, height: 22, background: color || C.accent, borderRadius: 2 }} />
       <span style={{ fontFamily: Fd, fontSize: 22, letterSpacing: "2px", color: C.text }}>{label}</span>
+    </div>
+  );
+}
+
+// ── Team Logo ─────────────────────────────────────────────────
+function TeamLogo({ logo, abbr, color, size = 32 }) {
+  const [err, setErr] = useState(false);
+  if (logo && !err) {
+    return (
+      <img
+        src={logo}
+        alt={abbr}
+        width={size}
+        height={size}
+        onError={() => setErr(true)}
+        style={{ objectFit: "contain", flexShrink: 0 }}
+      />
+    );
+  }
+  // Fallback: colored circle with abbr
+  return (
+    <div style={{ width: size, height: size, borderRadius: "50%", background: (color || C.borderBright) + "33", border: `1px solid ${color || C.borderBright}55`, display: "flex", alignItems: "center", justifyContent: "center", flexShrink: 0 }}>
+      <span style={{ fontSize: size * 0.28, fontWeight: 800, color: color || C.textMid, fontFamily: Fb }}>{abbr?.slice(0, 3)}</span>
     </div>
   );
 }
@@ -150,32 +131,169 @@ function Ticker({ tickers }) {
   );
 }
 
-// ── Score Card ────────────────────────────────────────────────
-function ScoreCard({ game }) {
-  const isLive = game.status === "live", isFinal = game.status === "final", hasScore = isLive || isFinal;
-  const wA = isFinal && game.winner === game.awayTeam, wH = isFinal && game.winner === game.homeTeam;
+// ── Game Detail Modal ─────────────────────────────────────────
+function GameModal({ game, league, onClose }) {
+  const [detail, setDetail] = useState(null);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    fetch(`/api/sports?league=${league}&type=detail&gameId=${game.id}`)
+      .then(r => r.json())
+      .then(d => { setDetail(d); setLoading(false); })
+      .catch(() => setLoading(false));
+  }, [game.id, league]);
+
   return (
-    <div style={{ background: C.card, border: `1px solid ${isLive ? C.red + "70" : C.border}`, borderRadius: 10, padding: "12px 14px", display: "flex", flexDirection: "column", justifyContent: "space-between", height: 140 }}>
-      <div style={{ display: "flex", justifyContent: "space-between" }}>
-        {isLive ? <div style={{ display: "flex", alignItems: "center", gap: 5 }}><LiveDot /><span style={{ fontSize: 10, color: C.red, fontWeight: 800, fontFamily: Fb, letterSpacing: "1px" }}>LIVE</span></div>
-          : <span style={{ fontSize: 10, color: isFinal ? C.textDim : C.green, fontWeight: 700, fontFamily: Fb, letterSpacing: "1px" }}>{isFinal ? "FINAL" : "UPCOMING"}</span>}
+    <div style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", zIndex: 1000, display: "flex", alignItems: "center", justifyContent: "center", padding: 20 }} onClick={onClose}>
+      <div style={{ background: C.surface, border: `1px solid ${C.borderBright}`, borderRadius: 16, width: "100%", maxWidth: 680, maxHeight: "85vh", overflow: "auto", padding: 28 }} onClick={e => e.stopPropagation()}>
+
+        {/* Header */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 24 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 16 }}>
+            <TeamLogo logo={game.awayLogo} abbr={game.awayTeam} color={game.awayColor} size={40} />
+            <div style={{ textAlign: "center" }}>
+              <div style={{ fontFamily: Fd, fontSize: 28, color: C.text, letterSpacing: "1px" }}>
+                {game.awayScore ?? "-"} — {game.homeScore ?? "-"}
+              </div>
+              <div style={{ fontSize: 11, color: game.status === "live" ? C.red : C.textMid, fontFamily: Fb, fontWeight: 700, letterSpacing: "1px" }}>
+                {game.status === "live" ? `🔴 ${game.period}` : game.status === "final" ? "FINAL" : game.time}
+              </div>
+            </div>
+            <TeamLogo logo={game.homeLogo} abbr={game.homeTeam} color={game.homeColor} size={40} />
+          </div>
+          <button onClick={onClose} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 8, padding: "6px 12px", color: C.textMid, cursor: "pointer", fontSize: 13, fontFamily: Fb }}>✕ Close</button>
+        </div>
+
+        {loading ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, color: C.textMid, fontFamily: Fb, padding: "20px 0" }}>
+            <div style={{ width: 16, height: 16, border: `2px solid ${C.border}`, borderTopColor: C.accent, borderRadius: "50%", animation: "spin 0.7s linear infinite" }} />
+            Loading stats...
+          </div>
+        ) : !detail?.teamStats?.length ? (
+          <div style={{ color: C.textDim, fontFamily: Fb, textAlign: "center", padding: "30px 0" }}>
+            Stats not available yet
+          </div>
+        ) : (
+          <div>
+            {/* Team Stats */}
+            {detail.teamStats?.length > 0 && (
+              <div style={{ marginBottom: 28 }}>
+                <div style={{ fontSize: 11, fontWeight: 800, color: C.accentBright, letterSpacing: "2px", fontFamily: Fb, marginBottom: 14, textTransform: "uppercase" }}>Team Stats</div>
+                <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
+                  {detail.teamStats.map((t, ti) => (
+                    <div key={ti} style={{ background: C.card, borderRadius: 10, padding: "14px 16px", border: `1px solid ${C.border}` }}>
+                      <div style={{ fontSize: 13, fontWeight: 800, color: C.text, fontFamily: Fb, marginBottom: 12 }}>{t.team}</div>
+                      {t.stats.map((s, si) => (
+                        <div key={si} style={{ display: "flex", justifyContent: "space-between", marginBottom: 6 }}>
+                          <span style={{ fontSize: 12, color: C.textMid, fontFamily: Fb }}>{s.name}</span>
+                          <span style={{ fontSize: 12, color: C.text, fontFamily: Fb, fontWeight: 600 }}>{s.value}</span>
+                        </div>
+                      ))}
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Player Stats */}
+            {detail.playerStats?.map((t, ti) => t.players?.length > 0 && (
+              <div key={ti} style={{ marginBottom: 24 }}>
+                <div style={{ fontSize: 11, fontWeight: 800, color: C.accentBright, letterSpacing: "2px", fontFamily: Fb, marginBottom: 12, textTransform: "uppercase" }}>{t.team} Players</div>
+                <div style={{ background: C.card, borderRadius: 10, border: `1px solid ${C.border}`, overflow: "hidden" }}>
+                  {t.players.map((p, pi) => (
+                    <div key={pi} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "10px 16px", borderBottom: pi < t.players.length - 1 ? `1px solid ${C.border}` : "none" }}>
+                      <div>
+                        <span style={{ fontSize: 14, fontWeight: 700, color: C.text, fontFamily: Fb }}>{p.name}</span>
+                        <span style={{ fontSize: 11, color: C.textMid, fontFamily: Fb, marginLeft: 8 }}>{p.position}</span>
+                      </div>
+                      <div style={{ display: "flex", gap: 16 }}>
+                        {p.stats.filter(s => s.value && s.value !== "0").slice(0, 4).map((s, si) => (
+                          <div key={si} style={{ textAlign: "center" }}>
+                            <div style={{ fontSize: 15, fontWeight: 800, color: C.text, fontFamily: Fb }}>{s.value}</div>
+                            <div style={{ fontSize: 10, color: C.textDim, fontFamily: Fb }}>{s.name}</div>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// ── Score Card — with logos + top performers ──────────────────
+function ScoreCard({ game, onSelect }) {
+  const isLive  = game.status === "live";
+  const isFinal = game.status === "final";
+  const hasScore = isLive || isFinal;
+  const wA = isFinal && game.winner === game.awayTeam;
+  const wH = isFinal && game.winner === game.homeTeam;
+
+  return (
+    <div
+      onClick={() => onSelect(game)}
+      style={{ background: C.card, border: `1px solid ${isLive ? C.red + "70" : C.border}`, borderRadius: 12, padding: "14px 16px", display: "flex", flexDirection: "column", gap: 12, cursor: "pointer", transition: "border-color 0.2s, background 0.2s" }}
+      onMouseEnter={e => e.currentTarget.style.background = "#16162A"}
+      onMouseLeave={e => e.currentTarget.style.background = C.card}
+    >
+      {/* Status row */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+        {isLive
+          ? <div style={{ display: "flex", alignItems: "center", gap: 5 }}><LiveDot /><span style={{ fontSize: 10, color: C.red, fontWeight: 800, fontFamily: Fb, letterSpacing: "1px" }}>LIVE</span></div>
+          : <span style={{ fontSize: 10, color: isFinal ? C.textDim : C.green, fontWeight: 700, fontFamily: Fb, letterSpacing: "1px" }}>{isFinal ? "FINAL" : "UPCOMING"}</span>
+        }
         {game.tv && <span style={{ fontSize: 10, color: C.textDim, fontFamily: Fb }}>{game.tv}</span>}
       </div>
-      <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span style={{ fontSize: 14, fontWeight: 800, fontFamily: Fb, color: isFinal && !wA ? C.textMid : C.text }}>{game.awayTeam}</span>
-          {hasScore && <span style={{ fontSize: 20, fontWeight: 900, fontFamily: Fb, color: isFinal && !wA ? C.textMid : C.text }}>{game.awayScore}</span>}
+
+      {/* Teams + scores */}
+      <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+        {/* Away */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <TeamLogo logo={game.awayLogo} abbr={game.awayTeam} color={game.awayColor} size={28} />
+            <span style={{ fontSize: 14, fontWeight: 800, fontFamily: Fb, color: isFinal && !wA ? C.textMid : C.text }}>{game.awayTeam}</span>
+          </div>
+          {hasScore && <span style={{ fontSize: 22, fontWeight: 900, fontFamily: Fb, color: isFinal && !wA ? C.textMid : C.text, lineHeight: 1 }}>{game.awayScore}</span>}
         </div>
         <div style={{ height: 1, background: C.border }} />
-        <div style={{ display: "flex", justifyContent: "space-between" }}>
-          <span style={{ fontSize: 14, fontWeight: 800, fontFamily: Fb, color: isFinal && !wH ? C.textMid : C.text }}>{game.homeTeam}</span>
-          {hasScore && <span style={{ fontSize: 20, fontWeight: 900, fontFamily: Fb, color: isFinal && !wH ? C.textMid : C.text }}>{game.homeScore}</span>}
+        {/* Home */}
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10 }}>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            <TeamLogo logo={game.homeLogo} abbr={game.homeTeam} color={game.homeColor} size={28} />
+            <span style={{ fontSize: 14, fontWeight: 800, fontFamily: Fb, color: isFinal && !wH ? C.textMid : C.text }}>{game.homeTeam}</span>
+          </div>
+          {hasScore && <span style={{ fontSize: 22, fontWeight: 900, fontFamily: Fb, color: isFinal && !wH ? C.textMid : C.text, lineHeight: 1 }}>{game.homeScore}</span>}
         </div>
       </div>
-      <div style={{ display: "flex", justifyContent: "space-between" }}>
-        <span style={{ fontSize: 11, color: isLive ? C.red : C.textDim, fontFamily: Fb, fontWeight: isLive ? 700 : 400 }}>{game.status === "upcoming" ? game.time : (game.period || "Final")}</span>
+
+      {/* Period + spread */}
+      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", borderTop: `1px solid ${C.border}`, paddingTop: 10 }}>
+        <span style={{ fontSize: 11, color: isLive ? C.red : C.textDim, fontFamily: Fb, fontWeight: isLive ? 700 : 400 }}>
+          {game.status === "upcoming" ? game.time : (game.period || "Final")}
+        </span>
         {game.spread && <span style={{ fontSize: 10, color: C.accentBright, fontFamily: Fb, fontWeight: 600, background: C.accent + "18", padding: "2px 7px", borderRadius: 4 }}>{game.spread}</span>}
       </div>
+
+      {/* Top Performers */}
+      {game.topPerformers?.length > 0 && (
+        <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10, display: "flex", flexDirection: "column", gap: 5 }}>
+          <div style={{ fontSize: 9, fontWeight: 800, color: C.textDim, fontFamily: Fb, letterSpacing: "1.5px", textTransform: "uppercase", marginBottom: 2 }}>Top Performers</div>
+          {game.topPerformers.slice(0, 2).map((p, i) => (
+            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+              <span style={{ fontSize: 12, color: C.textMid, fontFamily: Fb }}>{p.name}</span>
+              <span style={{ fontSize: 12, color: C.text, fontFamily: Fb, fontWeight: 700 }}>{p.value} <span style={{ color: C.textDim, fontWeight: 400 }}>{p.stat}</span></span>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Tap hint */}
+      <div style={{ textAlign: "center", fontSize: 10, color: C.textDim, fontFamily: Fb }}>Tap for box score →</div>
     </div>
   );
 }
@@ -193,54 +311,7 @@ function MarketCard({ t }) {
   );
 }
 
-// ── THE KEY COMPONENT: BulletSection ─────────────────────────
-// Subscribes to the module-level cache for one specific headline.
-// When the cache updates, this component re-renders independently.
-// The parent never needs to know about bullet state at all.
-function BulletSection({ headline, isSports }) {
-  const [data, setData] = useState(() => CACHE[headline] || null);
-
-  useEffect(() => {
-    // Subscribe to future updates for this headline
-    const unsub = subscribeBullets(headline, setData);
-    // Kick off the fetch (no-op if already cached)
-    fetchBulletsForHeadline(headline, isSports);
-    // If it's already done by the time we mount, sync state
-    if (CACHE[headline]) setData(CACHE[headline]);
-    return unsub;
-  }, [headline, isSports]);
-
-  if (!data || data.status === "loading") {
-    return (
-      <div style={{ display: "flex", alignItems: "center", gap: 10, paddingTop: 14, color: C.textMid, fontFamily: Fb, fontSize: 13 }}>
-        <div style={{ width: 14, height: 14, border: `2px solid ${C.border}`, borderTopColor: C.accent, borderRadius: "50%", animation: "spin 0.7s linear infinite", flexShrink: 0 }} />
-        Generating analysis...
-      </div>
-    );
-  }
-  if (!data.bullets?.length) return null;
-  return (
-    <div style={{ paddingTop: 14, display: "flex", flexDirection: "column", gap: 10 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 7 }}>
-        <div style={{ width: 18, height: 18, borderRadius: 5, background: C.accent, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontSize: 9, color: "#fff", fontWeight: 900, fontFamily: Fb }}>AI</span>
-        </div>
-        <span style={{ fontSize: 10, color: C.accentBright, fontWeight: 800, letterSpacing: "2px", textTransform: "uppercase", fontFamily: Fb }}>Field Analysis</span>
-      </div>
-      {data.bullets.map((b, i) => {
-        const m = BULLET_META[i] || BULLET_META[0];
-        return (
-          <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-            <span style={{ fontSize: 9, fontWeight: 900, color: m.color, fontFamily: Fb, letterSpacing: "1px", background: m.color + "15", padding: "3px 6px", borderRadius: 3, border: `1px solid ${m.color}25`, flexShrink: 0, marginTop: 3 }}>{m.tag}</span>
-            <span style={{ fontSize: 14, color: "#C0C0E0", lineHeight: 1.6, fontFamily: Fb }}>{b}</span>
-          </div>
-        );
-      })}
-    </div>
-  );
-}
-
-// ── Headline Card — uses BulletSection ───────────────────────
+// ── Headline Card ─────────────────────────────────────────────
 function HeadlineCard({ item, rank, isSports }) {
   const league  = isSports ? LEAGUES.find(l => l.id === item.league) : null;
   const cat     = !isSports ? NEWS_CATS.find(c => c.id === item.category) : null;
@@ -269,8 +340,6 @@ function HeadlineCard({ item, rank, isSports }) {
             <span style={{ fontSize: 13, color: C.textDim, fontFamily: Fb }}>{item.time}</span>
             {item.team && <><span style={{ color: C.textDim }}>·</span><span style={{ fontSize: 13, color: C.textDim, fontFamily: Fb }}>{item.team}</span></>}
           </div>
-          {/* Bullets live right here, under the headline */}
-          <BulletSection headline={item.headline} isSports={isSports} />
         </div>
       </div>
     </div>
@@ -284,6 +353,8 @@ export default function FieldApp() {
   const [section,    setSection]    = useState("scores");
   const [catFilter,  setCatFilter]  = useState("all");
   const [gameFilter, setGameFilter] = useState("all");
+  const [selectedGame, setSelectedGame] = useState(null);
+
   const [worldNews,  setWorldNews]  = useState([]);
   const [sportsNews, setSportsNews] = useState({});
   const [games,      setGames]      = useState({});
@@ -343,6 +414,8 @@ export default function FieldApp() {
         ::-webkit-scrollbar-thumb{background:${C.border};border-radius:2px}
       `}</style>
 
+      {selectedGame && <GameModal game={selectedGame} league={league} onClose={() => setSelectedGame(null)} />}
+
       <header style={{ background: C.surface, borderBottom: `1px solid ${C.border}`, position: "sticky", top: 0, zIndex: 200 }}>
         <div style={{ maxWidth: 1040, margin: "0 auto", padding: "0 24px" }}>
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px 0 12px" }}>
@@ -396,10 +469,12 @@ export default function FieldApp() {
                   ))}
                 </div>
                 {loading.sports
-                  ? <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>{[1,2,3,4].map(i => <Skeleton key={i} h={140} />)}</div>
+                  ? <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>{[1,2,3].map(i => <Skeleton key={i} h={200} />)}</div>
                   : leagueGames.length === 0
                     ? <div style={{ padding: "50px 0", textAlign: "center", color: C.textDim, fontFamily: Fb }}>No games scheduled</div>
-                    : <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 10 }}>{leagueGames.map(g => <ScoreCard key={g.id} game={g} />)}</div>
+                    : <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+                        {leagueGames.map(g => <ScoreCard key={g.id} game={g} onSelect={setSelectedGame} />)}
+                      </div>
                 }
               </div>
             )}
@@ -424,7 +499,7 @@ export default function FieldApp() {
               <Pill active={catFilter === "all"} onClick={() => setCatFilter("all")}>All</Pill>
               {NEWS_CATS.map(c => <Pill key={c.id} active={catFilter === c.id} onClick={() => setCatFilter(c.id)}>{c.emoji} {c.label}</Pill>)}
             </div>
-            {loading.news ? [1,2,3].map(i => <Skeleton key={i} h={200} />) : (
+            {loading.news ? [1,2,3].map(i => <Skeleton key={i} h={160} />) : (
               <>
                 {topWorld.length > 0 && (
                   <div style={{ marginBottom: 14 }}>

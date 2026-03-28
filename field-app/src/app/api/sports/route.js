@@ -108,10 +108,13 @@ export async function GET(request) {
   const { searchParams } = new URL(request.url);
   const league = searchParams.get("league") || "nba";
   const type   = searchParams.get("type")   || "scores";
+  const gameId = searchParams.get("gameId") || null;
   const cfg    = ESPN[league];
   if (!cfg) return Response.json({ games: [], news: [] });
   try {
-    return type === "news" ? getNews(cfg, league) : getScores(cfg);
+    if (type === "news") return getNews(cfg, league);
+    if (type === "detail" && gameId) return getGameDetail(cfg, gameId);
+    return getScores(cfg);
   } catch (e) {
     console.error("ESPN error", e);
     return Response.json({ games: [], news: [] });
@@ -133,10 +136,27 @@ async function getScores(cfg) {
     else if (st?.state === "in") status = "live";
     const aS = parseInt(away?.score ?? "0");
     const hS = parseInt(home?.score ?? "0");
+
+    // Pull top performers from leaders array
+    const leaders = comp?.leaders || [];
+    const topPerformers = leaders.slice(0, 3).map(cat => {
+      const leader = cat.leaders?.[0];
+      return leader ? {
+        name: leader.athlete?.shortName || leader.athlete?.displayName || "",
+        stat: cat.displayName || "",
+        value: leader.displayValue || "",
+        team: leader.athlete?.team?.abbreviation || "",
+      } : null;
+    }).filter(Boolean);
+
     return {
       id: ev.id, status,
       awayTeam: away?.team?.abbreviation || "TBD",
+      awayLogo: away?.team?.logo || null,
+      awayColor: away?.team?.color ? `#${away.team.color}` : null,
       homeTeam: home?.team?.abbreviation || "TBD",
+      homeLogo: home?.team?.logo || null,
+      homeColor: home?.team?.color ? `#${home.team.color}` : null,
       awayScore: status !== "upcoming" ? aS : null,
       homeScore: status !== "upcoming" ? hS : null,
       winner: status === "final" ? (aS > hS ? away?.team?.abbreviation : home?.team?.abbreviation) : null,
@@ -144,9 +164,44 @@ async function getScores(cfg) {
       time: ev.date ? new Date(ev.date).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" }) : null,
       spread: comp?.odds?.[0]?.details || null,
       tv: comp?.broadcasts?.[0]?.names?.[0] || null,
+      topPerformers,
     };
   });
   return Response.json({ games });
+}
+
+// New: fetch game summary (box score + stats) for a specific game
+async function getGameDetail(cfg, gameId) {
+  const url = `https://site.api.espn.com/apis/site/v2/sports/${cfg.sport}/${cfg.league}/summary?event=${gameId}`;
+  const res  = await fetch(url, { next: { revalidate: 30 } });
+  const data = await res.json();
+
+  const boxscore = data.boxscore || {};
+  const teams = boxscore.teams || [];
+
+  const teamStats = teams.map(t => ({
+    team: t.team?.abbreviation || "",
+    logo: t.team?.logo || null,
+    stats: (t.statistics || []).slice(0, 8).map(s => ({
+      name: s.label || s.name || "",
+      value: s.displayValue || s.value || "",
+    })),
+  }));
+
+  // Player stats
+  const playerStats = teams.map(t => ({
+    team: t.team?.abbreviation || "",
+    players: (t.athletes || []).slice(0, 5).map(p => ({
+      name: p.athlete?.shortName || p.athlete?.displayName || "",
+      position: p.athlete?.position?.abbreviation || "",
+      stats: (p.statistics || []).slice(0, 4).map((s, i) => ({
+        name: (boxscore.players?.[0]?.statistics?.[0]?.labels || [])[i] || "",
+        value: s || "",
+      })),
+    })).filter(p => p.name),
+  }));
+
+  return Response.json({ teamStats, playerStats });
 }
 
 async function getNews(cfg, leagueId) {
