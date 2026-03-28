@@ -296,22 +296,27 @@ export default function FieldApp() {
   const [tickers,    setTickers]    = useState([]);
   const [bullets,    setBullets]    = useState({});
   const [loading,    setLoading]    = useState({ news: true, sports: true, markets: true });
+  const inFlight = useRef(new Set());
 
-  // Fetch bullets
-  const fetchBullets = useCallback(async (item, isSports) => {
+  // Fetch bullets — ref guards against double-fetching
+  const fetchBullets = useRef(async (item, isSports) => {
     const id = item.id;
-    setBullets(prev => {
-      if (prev[id]) return prev;
-      return { ...prev, [id]: { loading: true, bullets: null } };
-    });
+    if (inFlight.current.has(id)) return;
+    inFlight.current.add(id);
+    setBullets(prev => ({ ...prev, [id]: { loading: true, bullets: null } }));
     try {
-      const r = await fetch("/api/analyze", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ headline: item.headline, type: isSports ? "sports" : "world" }) });
+      const r = await fetch("/api/analyze", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ headline: item.headline, type: isSports ? "sports" : "world" }),
+      });
       const d = await r.json();
       setBullets(prev => ({ ...prev, [id]: { loading: false, bullets: d.bullets } }));
     } catch {
       setBullets(prev => ({ ...prev, [id]: { loading: false, bullets: null } }));
+      inFlight.current.delete(id);
     }
-  }, []);
+  }).current;
 
   // World news
   useEffect(() => {
@@ -346,13 +351,13 @@ export default function FieldApp() {
       const vis = catFilter === "all" ? worldNews : worldNews.filter(h => h.category === catFilter);
       vis.slice(0, 10).forEach(item => fetchBullets(item, false));
     }
-  }, [tab, catFilter, worldNews, fetchBullets]);
+  }, [tab, catFilter, worldNews]); // eslint-disable-line
 
   useEffect(() => {
     if (tab === "sports" && section === "news") {
       (sportsNews[league] || []).slice(0, 8).forEach(item => fetchBullets(item, true));
     }
-  }, [tab, section, league, sportsNews, fetchBullets]);
+  }, [tab, section, league, sportsNews]); // eslint-disable-line
 
   // Derived
   const activeLeague = LEAGUES.find(l => l.id === league);
