@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useCallback, useRef } from "react";
+import { useState, useEffect, useRef } from "react";
 
 // ─── Design tokens ────────────────────────────────────────────
 const C = {
@@ -124,32 +124,97 @@ function Ticker({ tickers }) {
   );
 }
 
-// ─── AI Bullets ───────────────────────────────────────────────
-function AIBullets({ bullets, loading }) {
-  if (loading) return (
-    <div style={{ display: "flex", alignItems: "center", gap: 10, paddingTop: 16, color: C.textMid, fontFamily: F.body, fontSize: 13 }}>
-      <div style={{ width: 14, height: 14, border: `2px solid ${C.border}`, borderTopColor: C.accent, borderRadius: "50%", animation: "spin 0.7s linear infinite", flexShrink: 0 }} />
-      Generating analysis...
-    </div>
-  );
-  if (!bullets?.length) return null;
+// ─── Self-contained HeadlineCard with built-in bullet fetching ───
+// Each card manages its own bullets state and fetches on mount.
+// No shared state, no timing issues, no coordination needed.
+function HeadlineCard({ item, rank, isSports }) {
+  const [bullets, setBullets] = useState(null);
+  const [bulletsLoading, setBulletsLoading] = useState(true);
+  const league  = isSports ? LEAGUES.find(l => l.id === item.league) : null;
+  const cat     = !isSports ? NEWS_CATS.find(c => c.id === item.category) : null;
+  const typeCfg = isSports ? (TYPE_CFG[item.type] || TYPE_CFG.storyline) : null;
+
+  useEffect(() => {
+    let cancelled = false;
+    async function load() {
+      try {
+        const res = await fetch("/api/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            headline: item.headline,
+            type: isSports ? "sports" : "world",
+          }),
+        });
+        const data = await res.json();
+        if (!cancelled) {
+          setBullets(data.bullets || null);
+          setBulletsLoading(false);
+        }
+      } catch {
+        if (!cancelled) setBulletsLoading(false);
+      }
+    }
+    load();
+    return () => { cancelled = true; };
+  }, [item.headline, isSports]);
+
   return (
-    <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${C.border}`, display: "flex", flexDirection: "column", gap: 11 }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 2 }}>
-        <div style={{ width: 18, height: 18, borderRadius: 5, background: C.accent, display: "flex", alignItems: "center", justifyContent: "center" }}>
-          <span style={{ fontSize: 9, color: "#fff", fontWeight: 900, fontFamily: F.body }}>AI</span>
-        </div>
-        <span style={{ fontSize: 10, color: C.accentBright, fontWeight: 800, letterSpacing: "2px", textTransform: "uppercase", fontFamily: F.body }}>Field Analysis</span>
-      </div>
-      {bullets.map((b, i) => {
-        const m = BULLET_META[i] || BULLET_META[0];
-        return (
-          <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
-            <span style={{ fontSize: 9, fontWeight: 900, color: m.color, fontFamily: F.body, letterSpacing: "1px", background: m.color + "15", padding: "3px 6px", borderRadius: 3, border: `1px solid ${m.color}25`, flexShrink: 0, marginTop: 2 }}>{m.tag}</span>
-            <span style={{ fontSize: 14, color: "#C0C0E0", lineHeight: 1.6, fontFamily: F.body }}>{b}</span>
+    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "22px 24px", position: "relative", overflow: "hidden" }}>
+      {rank === 1 && <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg, ${C.gold}, ${C.orange}, transparent)` }} />}
+      <div style={{ display: "flex", gap: 18, alignItems: "flex-start" }}>
+        {rank != null && (
+          <div style={{ flexShrink: 0, fontFamily: F.display, fontSize: 44, lineHeight: 1, color: rank === 1 ? C.gold : C.borderBright, letterSpacing: "-2px", minWidth: 48 }}>
+            {String(rank).padStart(2, "0")}
           </div>
-        );
-      })}
+        )}
+        <div style={{ flex: 1, minWidth: 0 }}>
+          <div style={{ display: "flex", gap: 7, alignItems: "center", marginBottom: 11, flexWrap: "wrap" }}>
+            {typeCfg && <Badge label={typeCfg.label} color={typeCfg.color} />}
+            {cat      && <Badge label={`${cat.emoji} ${cat.label}`} color={cat.color} />}
+            {item.breaking && <Badge label="🔴 BREAKING" color={C.red} />}
+            {league   && <span style={{ fontSize: 13, color: league.color, fontFamily: F.body, fontWeight: 700 }}>{league.emoji} {league.name}</span>}
+            {item.region && <span style={{ fontSize: 12, color: C.textDim, fontFamily: F.body }}>{item.region}</span>}
+          </div>
+          <div style={{ fontSize: 18, fontWeight: 700, color: C.text, lineHeight: 1.45, fontFamily: F.body, marginBottom: 10, letterSpacing: "-0.2px" }}>
+            {item.headline}
+          </div>
+          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
+            <span style={{ fontSize: 13, color: C.textMid, fontFamily: F.body }}>via <span style={{ color: "#9898C0", fontWeight: 600 }}>{item.source}</span></span>
+            <span style={{ color: C.textDim }}>·</span>
+            <span style={{ fontSize: 13, color: C.textDim, fontFamily: F.body }}>{item.time}</span>
+            {item.team && <><span style={{ color: C.textDim }}>·</span><span style={{ fontSize: 13, color: C.textDim, fontFamily: F.body }}>{item.team}</span></>}
+          </div>
+        </div>
+      </div>
+
+      {/* Bullets — always shown, self-fetching */}
+      <div style={{ marginTop: 16, paddingTop: 16, borderTop: `1px solid ${C.border}` }}>
+        {bulletsLoading ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, color: C.textMid, fontFamily: F.body, fontSize: 13 }}>
+            <div style={{ width: 14, height: 14, border: `2px solid ${C.border}`, borderTopColor: C.accent, borderRadius: "50%", animation: "spin 0.7s linear infinite", flexShrink: 0 }} />
+            Generating analysis...
+          </div>
+        ) : bullets?.length ? (
+          <div style={{ display: "flex", flexDirection: "column", gap: 11 }}>
+            <div style={{ display: "flex", alignItems: "center", gap: 7, marginBottom: 2 }}>
+              <div style={{ width: 18, height: 18, borderRadius: 5, background: C.accent, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                <span style={{ fontSize: 9, color: "#fff", fontWeight: 900, fontFamily: F.body }}>AI</span>
+              </div>
+              <span style={{ fontSize: 10, color: C.accentBright, fontWeight: 800, letterSpacing: "2px", textTransform: "uppercase", fontFamily: F.body }}>Field Analysis</span>
+            </div>
+            {bullets.map((b, i) => {
+              const m = BULLET_META[i] || BULLET_META[0];
+              return (
+                <div key={i} style={{ display: "flex", gap: 10, alignItems: "flex-start" }}>
+                  <span style={{ fontSize: 9, fontWeight: 900, color: m.color, fontFamily: F.body, letterSpacing: "1px", background: m.color + "15", padding: "3px 6px", borderRadius: 3, border: `1px solid ${m.color}25`, flexShrink: 0, marginTop: 2 }}>{m.tag}</span>
+                  <span style={{ fontSize: 14, color: "#C0C0E0", lineHeight: 1.6, fontFamily: F.body }}>{b}</span>
+                </div>
+              );
+            })}
+          </div>
+        ) : null}
+      </div>
     </div>
   );
 }
@@ -211,48 +276,7 @@ function ScoreCard({ game }) {
   );
 }
 
-// ─── Headline Card ────────────────────────────────────────────
-function HeadlineCard({ item, bullets, loading, rank, isSports }) {
-  const league  = isSports ? LEAGUES.find(l => l.id === item.league) : null;
-  const cat     = !isSports ? NEWS_CATS.find(c => c.id === item.category) : null;
-  const typeCfg = isSports ? (TYPE_CFG[item.type] || TYPE_CFG.storyline) : null;
-
-  return (
-    <div style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "22px 24px", position: "relative", overflow: "hidden" }}>
-      {rank === 1 && <div style={{ position: "absolute", top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg, ${C.gold}, ${C.orange}, transparent)` }} />}
-
-      <div style={{ display: "flex", gap: 18, alignItems: "flex-start" }}>
-        {rank != null && (
-          <div style={{ flexShrink: 0, fontFamily: F.display, fontSize: 44, lineHeight: 1, color: rank === 1 ? C.gold : C.borderBright, letterSpacing: "-2px", minWidth: 48 }}>
-            {String(rank).padStart(2, "0")}
-          </div>
-        )}
-        <div style={{ flex: 1, minWidth: 0 }}>
-          <div style={{ display: "flex", gap: 7, alignItems: "center", marginBottom: 11, flexWrap: "wrap" }}>
-            {typeCfg && <Badge label={typeCfg.label} color={typeCfg.color} />}
-            {cat      && <Badge label={`${cat.emoji} ${cat.label}`} color={cat.color} />}
-            {item.breaking && <Badge label="🔴 BREAKING" color={C.red} />}
-            {league   && <span style={{ fontSize: 13, color: league.color, fontFamily: F.body, fontWeight: 700 }}>{league.emoji} {league.name}</span>}
-            {item.region && <span style={{ fontSize: 12, color: C.textDim, fontFamily: F.body }}>{item.region}</span>}
-          </div>
-
-          <div style={{ fontSize: 18, fontWeight: 700, color: C.text, lineHeight: 1.45, fontFamily: F.body, marginBottom: 10, letterSpacing: "-0.2px" }}>
-            {item.headline}
-          </div>
-
-          <div style={{ display: "flex", gap: 10, flexWrap: "wrap", alignItems: "center" }}>
-            <span style={{ fontSize: 13, color: C.textMid, fontFamily: F.body }}>via <span style={{ color: "#9898C0", fontWeight: 600 }}>{item.source}</span></span>
-            <span style={{ color: C.textDim }}>·</span>
-            <span style={{ fontSize: 13, color: C.textDim, fontFamily: F.body }}>{item.time}</span>
-            {item.team && <><span style={{ color: C.textDim }}>·</span><span style={{ fontSize: 13, color: C.textDim, fontFamily: F.body }}>{item.team}</span></>}
-          </div>
-        </div>
-      </div>
-
-      <AIBullets bullets={bullets} loading={loading} />
-    </div>
-  );
-}
+// HeadlineCard is defined above with built-in bullets
 
 // ─── Market Card ──────────────────────────────────────────────
 function MarketCard({ t }) {
@@ -294,31 +318,7 @@ export default function FieldApp() {
   const [sportsNews, setSportsNews] = useState({});
   const [games,      setGames]      = useState({});
   const [tickers,    setTickers]    = useState([]);
-  const [bullets,    setBullets]    = useState({});
   const [loading,    setLoading]    = useState({ news: true, sports: true, markets: true });
-  const inFlight = useRef(new Set());
-  const setBulletsRef = useRef(setBullets);
-  useEffect(() => { setBulletsRef.current = setBullets; }, [setBullets]);
-
-  // Stable fetchBullets — never changes reference, always uses latest setBullets
-  const fetchBullets = useCallback(async (item, isSports) => {
-    const id = item.id;
-    if (inFlight.current.has(id)) return;
-    inFlight.current.add(id);
-    setBulletsRef.current(prev => ({ ...prev, [id]: { loading: true, bullets: null } }));
-    try {
-      const r = await fetch("/api/analyze", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ headline: item.headline, type: isSports ? "sports" : "world" }),
-      });
-      const d = await r.json();
-      setBulletsRef.current(prev => ({ ...prev, [id]: { loading: false, bullets: d.bullets } }));
-    } catch {
-      setBulletsRef.current(prev => ({ ...prev, [id]: { loading: false, bullets: null } }));
-      inFlight.current.delete(id);
-    }
-  }, []);
 
   // World news
   useEffect(() => {
@@ -333,7 +333,7 @@ export default function FieldApp() {
     return () => clearInterval(t);
   }, []);
 
-  // Sports data — fetch scores + news, then immediately kick off bullet generation
+  // Sports data
   useEffect(() => {
     if (tab !== "sports") return;
     setLoading(p => ({ ...p, sports: true }));
@@ -341,34 +341,11 @@ export default function FieldApp() {
       fetch(`/api/sports?league=${league}&type=scores`).then(r => r.json()),
       fetch(`/api/sports?league=${league}&type=news`).then(r => r.json()),
     ]).then(([s, n]) => {
-      const newsItems = n.news || [];
       setGames(prev      => ({ ...prev, [league]: s.games || [] }));
-      setSportsNews(prev => ({ ...prev, [league]: newsItems }));
+      setSportsNews(prev => ({ ...prev, [league]: n.news  || [] }));
       setLoading(p => ({ ...p, sports: false }));
-      // Trigger bullets immediately after news loads — don't rely on a separate useEffect
-      if (section === "news") {
-        newsItems.slice(0, 8).forEach(item => fetchBullets(item, true));
-      }
     }).catch(() => setLoading(p => ({ ...p, sports: false })));
-  }, [tab, league, section, fetchBullets]);
-
-  // World news bullets — fires when worldNews populates or tab/filter changes
-  useEffect(() => {
-    if ((tab === "news" || tab === "markets") && worldNews.length > 0) {
-      const vis = catFilter === "all" ? worldNews : worldNews.filter(h => h.category === catFilter);
-      vis.slice(0, 10).forEach(item => fetchBullets(item, false));
-    }
-  }, [tab, catFilter, worldNews, fetchBullets]);
-
-  // Sports news bullets — fires when sportsNews updates (switching leagues)
-  useEffect(() => {
-    if (tab === "sports" && section === "news") {
-      const items = sportsNews[league] || [];
-      if (items.length > 0) {
-        items.slice(0, 8).forEach(item => fetchBullets(item, true));
-      }
-    }
-  }, [tab, section, league, sportsNews, fetchBullets]);
+  }, [tab, league]);
 
   // Derived
   const activeLeague = LEAGUES.find(l => l.id === league);
@@ -493,7 +470,7 @@ export default function FieldApp() {
                   ? [1,2,3].map(i => <Skeleton key={i} h={160} />)
                   : leagueNews.length === 0
                     ? <div style={{ padding: "50px 0", textAlign: "center", color: C.textDim, fontFamily: F.body, fontSize: 15 }}>No stories right now</div>
-                    : leagueNews.map(item => <HeadlineCard key={item.id} item={item} rank={item.rank} isSports={true} bullets={bullets[item.id]?.bullets} loading={bullets[item.id]?.loading} />)
+                    : leagueNews.map(item => <HeadlineCard key={item.id} item={item} rank={item.rank} isSports={true} />)
                 }
               </div>
             )}
@@ -513,7 +490,7 @@ export default function FieldApp() {
                 <div style={{ marginBottom: 14 }}>
                   <SectionHead label="TOP STORIES" color={`linear-gradient(180deg, ${C.gold}, ${C.orange})`} />
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {topWorld.map(item => <HeadlineCard key={item.id} item={item} rank={item.rank} isSports={false} bullets={bullets[item.id]?.bullets} loading={bullets[item.id]?.loading} />)}
+                    {topWorld.map(item => <HeadlineCard key={item.id} item={item} rank={item.rank} isSports={false} />)}
                   </div>
                 </div>
               )}
@@ -521,7 +498,7 @@ export default function FieldApp() {
                 <div style={{ marginTop: 32 }}>
                   <SectionHead label="MORE STORIES" color={C.borderBright} />
                   <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-                    {moreWorld.map(item => <HeadlineCard key={item.id} item={item} rank={null} isSports={false} bullets={bullets[item.id]?.bullets} loading={bullets[item.id]?.loading} />)}
+                    {moreWorld.map(item => <HeadlineCard key={item.id} item={item} rank={null} isSports={false} />)}
                   </div>
                 </div>
               )}
@@ -551,7 +528,7 @@ export default function FieldApp() {
             <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
               {mktNews.length === 0
                 ? [1,2,3].map(i => <Skeleton key={i} h={160} />)
-                : mktNews.map(item => <HeadlineCard key={item.id} item={item} rank={item.rank || null} isSports={false} bullets={bullets[item.id]?.bullets} loading={bullets[item.id]?.loading} />)
+                : mktNews.map(item => <HeadlineCard key={item.id} item={item} rank={item.rank || null} isSports={false} />)
               }
             </div>
           </div>
