@@ -1,51 +1,48 @@
-// src/app/api/analyze/route.js
-// Generates AI bullet points for any headline using Claude.
+// AI bullet points for any headline - powered by Claude
 
 export async function POST(request) {
   try {
     const { headline, type } = await request.json();
-    const apiKey = process.env.ANTHROPIC_API_KEY;
+    const key = process.env.ANTHROPIC_API_KEY;
 
-    if (!apiKey || apiKey === "your_anthropic_key_here") {
-      return Response.json({
-        bullets: [
-          "AI analysis requires an Anthropic API key — add it to your .env.local file.",
-          "Sign up at console.anthropic.com to get your key.",
-          "Once added, bullet points will auto-generate for every headline.",
-          "Analysis covers: what happened, why it matters, historical context, and impact.",
-        ]
-      });
+    if (!key || key === "your_anthropic_key_here") {
+      return Response.json({ bullets: [
+        "Add your ANTHROPIC_API_KEY to Vercel Environment Variables to enable AI analysis.",
+        "Go to Vercel → Settings → Environment Variables.",
+        "Once added, bullet points will appear automatically for every headline.",
+        "Analysis covers: what happened, why it matters, context, and impact.",
+      ]});
     }
 
     const isSports = type === "sports";
 
     const prompt = isSports
-      ? `You are a sharp sports analyst. For this story: "${headline}"
-Give exactly 4 bullet points:
-1. What happened (1 crisp sentence)
-2. Why it matters (team/league significance)
-3. Historical context (comparable moves or precedent)
-4. Competitive impact (effect on standings, odds, or season)
-Respond ONLY as a JSON array of 4 strings. No markdown, no backticks.`
-      : `You are a sharp news analyst. For this headline: "${headline}"
-Give exactly 4 bullet points:
-1. What happened (1 crisp sentence)
-2. Why it matters (broader significance)
-3. Historical context (brief background or precedent)
-4. Market or geopolitical impact (economic or strategic effect)
-Respond ONLY as a JSON array of 4 strings. No markdown, no backticks.`;
+      ? `Sports story: "${headline}"
+Provide exactly 4 fact-based bullet points:
+1. WHAT HAPPENED — one crisp factual sentence
+2. WHY IT MATTERS — team or league significance
+3. HISTORICAL CONTEXT — comparable precedent or record
+4. COMPETITIVE IMPACT — effect on standings, odds, or season outlook
+No opinions. Facts only. JSON array of 4 strings, no markdown.`
+      : `News headline: "${headline}"
+Provide exactly 4 fact-based bullet points:
+1. WHAT HAPPENED — one crisp factual sentence summarizing the event
+2. WHY IT MATTERS — real-world significance of this development
+3. HISTORICAL CONTEXT — relevant background, precedent, or timeline
+4. MARKET/GEOPOLITICAL IMPACT — concrete economic or strategic effect
+No opinions or speculation. Facts and context only. JSON array of 4 strings, no markdown.`;
 
     const res = await fetch("https://api.anthropic.com/v1/messages", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
-        "x-api-key": apiKey,
+        "x-api-key": key,
         "anthropic-version": "2023-06-01",
       },
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
-        max_tokens: 500,
-        system: "You are a concise analyst. Always respond with a valid JSON array of exactly 4 short strings. No markdown.",
+        max_tokens: 600,
+        system: "You are a factual news analyst. No opinions, no speculation. Always respond with a valid JSON array of exactly 4 strings. No markdown, no backticks.",
         messages: [{ role: "user", content: prompt }],
       }),
     });
@@ -53,10 +50,9 @@ Respond ONLY as a JSON array of 4 strings. No markdown, no backticks.`;
     const data = await res.json();
     const text = data.content?.map(c => c.text || "").join("") || "[]";
     const bullets = JSON.parse(text.replace(/```json|```/g, "").trim());
-
     return Response.json({ bullets });
-  } catch (err) {
-    console.error("Analyze error:", err);
+  } catch (e) {
+    console.error("Analyze error", e);
     return Response.json({ bullets: ["Analysis temporarily unavailable."] });
   }
 }
