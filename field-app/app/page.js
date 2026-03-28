@@ -1,5 +1,5 @@
 "use client";
-import { useState, useEffect, useRef } from "react";
+import { useState, useEffect, useRef, useCallback } from "react";
 
 // ── Design ────────────────────────────────────────────────────
 const C = {
@@ -354,7 +354,7 @@ function MarketCard({ t }) {
   );
 }
 
-// ── AI Analysis Panel ─────────────────────────────────────────
+// ── AI Analysis Panel (always visible) ────────────────────────
 function AnalysisPanel({ analysis, loading, type }) {
   const showGrade = analysis?.grade && (type === "trade" || type === "signing");
   const gradeColor = GRADE_COLORS[analysis?.grade] || C.textMid;
@@ -377,7 +377,7 @@ function AnalysisPanel({ analysis, loading, type }) {
             animation: "spin 0.7s linear infinite",
           }} />
           <span style={{ fontSize: 13, color: C.accentBright, fontFamily: Fb, fontWeight: 600, letterSpacing: "0.5px" }}>
-            Analyzing...
+            Generating analysis...
           </span>
         </div>
         <div style={{ marginTop: 12, display: "flex", flexDirection: "column", gap: 8 }}>
@@ -474,17 +474,16 @@ function AnalysisPanel({ analysis, loading, type }) {
   );
 }
 
-// ── Headline Card (with expandable AI Analysis) ───────────────
-function HeadlineCard({ item, rank, isSports, analysis, analysisLoading, onToggleAnalysis }) {
+// ── Headline Card (analysis auto-loads, no button) ────────────
+function HeadlineCard({ item, rank, isSports, analysis, analysisLoading }) {
   const league  = isSports ? LEAGUES.find(l => l.id === item.league) : null;
   const cat     = !isSports ? NEWS_CATS.find(c => c.id === item.category) : null;
   const typeCfg = isSports ? (TYPE_CFG[item.type] || TYPE_CFG.storyline) : null;
-  const isExpanded = analysis !== undefined || analysisLoading;
 
   return (
     <div style={{
       background: C.card,
-      border: "1px solid " + (isExpanded ? C.accent + "40" : C.border),
+      border: "1px solid " + C.border,
       borderRadius: 14,
       padding: "24px 28px",
       position: "relative",
@@ -514,49 +513,9 @@ function HeadlineCard({ item, rank, isSports, analysis, analysisLoading, onToggl
             <span style={{ color: C.textDim }}>{"\u00B7"}</span>
             <span style={{ fontSize: 14, color: C.textDim, fontFamily: Fb }}>{item.time}</span>
             {item.team && <><span style={{ color: C.textDim }}>{"\u00B7"}</span><span style={{ fontSize: 14, color: C.textDim, fontFamily: Fb }}>{item.team}</span></>}
-            <span style={{ color: C.textDim }}>{"\u00B7"}</span>
-            <button
-              onClick={(e) => { e.stopPropagation(); onToggleAnalysis(item); }}
-              style={{
-                background: isExpanded ? C.accent + "20" : "transparent",
-                border: "1px solid " + (isExpanded ? C.accent + "50" : C.borderBright),
-                borderRadius: 6,
-                padding: "4px 12px",
-                cursor: "pointer",
-                display: "flex",
-                alignItems: "center",
-                gap: 6,
-                transition: "all 0.15s",
-              }}
-              onMouseEnter={e => {
-                if (!isExpanded) {
-                  e.currentTarget.style.background = C.accent + "15";
-                  e.currentTarget.style.borderColor = C.accent + "40";
-                }
-              }}
-              onMouseLeave={e => {
-                if (!isExpanded) {
-                  e.currentTarget.style.background = "transparent";
-                  e.currentTarget.style.borderColor = C.borderBright;
-                }
-              }}
-            >
-              <span style={{ fontSize: 12 }}>{"\u2726"}</span>
-              <span style={{
-                fontSize: 12,
-                fontWeight: 700,
-                color: isExpanded ? C.accentBright : C.textMid,
-                fontFamily: Fb,
-                letterSpacing: "0.5px",
-              }}>
-                {isExpanded ? "AI Analysis" : "Analyze"}
-              </span>
-              {isExpanded && (
-                <span style={{ fontSize: 11, color: C.textDim, marginLeft: 2 }}>{"\u25B2"}</span>
-              )}
-            </button>
           </div>
 
+          {/* AI Analysis — always shown, auto-loaded */}
           <AnalysisPanel
             analysis={analysis}
             loading={analysisLoading}
@@ -566,6 +525,63 @@ function HeadlineCard({ item, rank, isSports, analysis, analysisLoading, onToggl
       </div>
     </div>
   );
+}
+
+// ── Auto-fetch analysis for a list of items ───────────────────
+function useAutoAnalysis(items, analyses, setAnalyses) {
+  const pending = useRef(new Set());
+
+  useEffect(() => {
+    if (!items || items.length === 0) return;
+
+    // Find items that haven't been fetched yet
+    const toFetch = items.filter(item =>
+      item?.id && analyses[item.id] === undefined && !pending.current.has(item.id)
+    );
+
+    if (toFetch.length === 0) return;
+
+    // Stagger requests — 300ms apart so we don't slam the API
+    toFetch.forEach((item, idx) => {
+      const id = item.id;
+      pending.current.add(id);
+
+      // Set loading state immediately
+      setAnalyses(prev => {
+        if (prev[id] !== undefined) return prev;
+        return { ...prev, ["_loading_" + id]: true };
+      });
+
+      setTimeout(() => {
+        fetch("/api/analyze", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            headline: item.headline,
+            type: item.type || "news",
+            category: item.category || null,
+          }),
+        })
+          .then(r => r.json())
+          .then(data => {
+            setAnalyses(prev => {
+              const next = { ...prev, [id]: data };
+              delete next["_loading_" + id];
+              return next;
+            });
+            pending.current.delete(id);
+          })
+          .catch(() => {
+            setAnalyses(prev => {
+              const next = { ...prev, [id]: { summary: "Analysis temporarily unavailable." } };
+              delete next["_loading_" + id];
+              return next;
+            });
+            pending.current.delete(id);
+          });
+      }, idx * 300);
+    });
+  }, [items, analyses, setAnalyses]);
 }
 
 // ── Main App ──────────────────────────────────────────────────
@@ -583,43 +599,10 @@ export default function FieldApp() {
   const [tickers,    setTickers]    = useState([]);
   const [loading,    setLoading]    = useState({ news: true, sports: true });
 
-  const [analyses,        setAnalyses]        = useState({});
-  const [analysisLoading, setAnalysisLoading] = useState({});
+  // Single analysis cache — persists across tab switches
+  const [analyses, setAnalyses] = useState({});
 
-  const handleToggleAnalysis = (item) => {
-    const id = item.id;
-    if (analyses[id] !== undefined) {
-      setAnalyses(prev => {
-        const next = { ...prev };
-        delete next[id];
-        return next;
-      });
-      return;
-    }
-    if (analysisLoading[id]) return;
-
-    setAnalysisLoading(prev => ({ ...prev, [id]: true }));
-
-    fetch("/api/analyze", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        headline: item.headline,
-        type: item.type || "news",
-        category: item.category || null,
-      }),
-    })
-      .then(r => r.json())
-      .then(data => {
-        setAnalyses(prev => ({ ...prev, [id]: data }));
-        setAnalysisLoading(prev => ({ ...prev, [id]: false }));
-      })
-      .catch(() => {
-        setAnalyses(prev => ({ ...prev, [id]: { summary: "Analysis unavailable. Try again." } }));
-        setAnalysisLoading(prev => ({ ...prev, [id]: false }));
-      });
-  };
-
+  // Fetch data
   useEffect(() => {
     fetch("/api/news").then(r => r.json()).then(d => {
       setWorldNews(d.articles || []);
@@ -656,6 +639,18 @@ export default function FieldApp() {
   const moreWorld    = visWorld.filter(h => !h.rank);
   const breaking     = worldNews.filter(h => h.breaking).slice(0, 3);
   const mktNews      = worldNews.filter(h => ["markets", "geo"].includes(h.category));
+
+  // Auto-fetch analyses for currently visible headlines
+  const currentSportsNews = (tab === "sports" && section === "news") ? leagueNews : [];
+  const currentWorldNews  = tab === "news" ? visWorld : [];
+  const currentMktNews    = tab === "markets" ? mktNews : [];
+
+  useAutoAnalysis(currentSportsNews, analyses, setAnalyses);
+  useAutoAnalysis(currentWorldNews, analyses, setAnalyses);
+  useAutoAnalysis(currentMktNews, analyses, setAnalyses);
+
+  // Helper to check loading state
+  const isItemLoading = (id) => analyses["_loading_" + id] === true && analyses[id] === undefined;
 
   const TabBtn = ({ id, label }) => (
     <button onClick={() => setTab(id)} style={{
@@ -775,8 +770,7 @@ export default function FieldApp() {
                           rank={item.rank}
                           isSports={true}
                           analysis={analyses[item.id]}
-                          analysisLoading={analysisLoading[item.id] || false}
-                          onToggleAnalysis={handleToggleAnalysis}
+                          analysisLoading={isItemLoading(item.id)}
                         />
                       ))
                 }
@@ -804,8 +798,7 @@ export default function FieldApp() {
                           rank={item.rank}
                           isSports={false}
                           analysis={analyses[item.id]}
-                          analysisLoading={analysisLoading[item.id] || false}
-                          onToggleAnalysis={handleToggleAnalysis}
+                          analysisLoading={isItemLoading(item.id)}
                         />
                       ))}
                     </div>
@@ -822,8 +815,7 @@ export default function FieldApp() {
                           rank={null}
                           isSports={false}
                           analysis={analyses[item.id]}
-                          analysisLoading={analysisLoading[item.id] || false}
-                          onToggleAnalysis={handleToggleAnalysis}
+                          analysisLoading={isItemLoading(item.id)}
                         />
                       ))}
                     </div>
@@ -855,8 +847,7 @@ export default function FieldApp() {
                       rank={item.rank || null}
                       isSports={false}
                       analysis={analyses[item.id]}
-                      analysisLoading={analysisLoading[item.id] || false}
-                      onToggleAnalysis={handleToggleAnalysis}
+                      analysisLoading={isItemLoading(item.id)}
                     />
                   ))
               }
