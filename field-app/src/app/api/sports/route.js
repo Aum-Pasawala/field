@@ -39,9 +39,15 @@ const TRASH = [
   // Celebrity fluff
   "taylor swift", "travis kelce girlfriend", "celebrity", "iheartradio",
   "music awards", "oscars", "grammy", "reality tv", "kardashian",
+  // Highlight / recap content
+  "highlights", "highlight:", "watch:", "best plays", "top plays",
+  "game highlights", "best moments", "video:", "key plays",
   // Other garbage
   "need to know", "must-watch", "read:", "buy or sell",
   "over/under", "future stars", "mock draft",
+  // Tracker / aggregator articles (not real news)
+  "tracker", "offseason moves", "latest news and updates",
+  "everything to know", "what you need", "full list",
 ];
 
 // ONLY these patterns indicate real factual sports news

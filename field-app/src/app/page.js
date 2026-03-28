@@ -297,13 +297,15 @@ export default function FieldApp() {
   const [bullets,    setBullets]    = useState({});
   const [loading,    setLoading]    = useState({ news: true, sports: true, markets: true });
   const inFlight = useRef(new Set());
+  const setBulletsRef = useRef(setBullets);
+  useEffect(() => { setBulletsRef.current = setBullets; }, [setBullets]);
 
-  // Fetch bullets — ref guards against double-fetching
-  const fetchBullets = useRef(async (item, isSports) => {
+  // Stable fetchBullets — never changes reference, always uses latest setBullets
+  const fetchBullets = useCallback(async (item, isSports) => {
     const id = item.id;
     if (inFlight.current.has(id)) return;
     inFlight.current.add(id);
-    setBullets(prev => ({ ...prev, [id]: { loading: true, bullets: null } }));
+    setBulletsRef.current(prev => ({ ...prev, [id]: { loading: true, bullets: null } }));
     try {
       const r = await fetch("/api/analyze", {
         method: "POST",
@@ -311,12 +313,12 @@ export default function FieldApp() {
         body: JSON.stringify({ headline: item.headline, type: isSports ? "sports" : "world" }),
       });
       const d = await r.json();
-      setBullets(prev => ({ ...prev, [id]: { loading: false, bullets: d.bullets } }));
+      setBulletsRef.current(prev => ({ ...prev, [id]: { loading: false, bullets: d.bullets } }));
     } catch {
-      setBullets(prev => ({ ...prev, [id]: { loading: false, bullets: null } }));
+      setBulletsRef.current(prev => ({ ...prev, [id]: { loading: false, bullets: null } }));
       inFlight.current.delete(id);
     }
-  }).current;
+  }, []);
 
   // World news
   useEffect(() => {
@@ -331,7 +333,7 @@ export default function FieldApp() {
     return () => clearInterval(t);
   }, []);
 
-  // Sports data
+  // Sports data — fetch scores + news, then immediately kick off bullet generation
   useEffect(() => {
     if (tab !== "sports") return;
     setLoading(p => ({ ...p, sports: true }));
@@ -339,25 +341,34 @@ export default function FieldApp() {
       fetch(`/api/sports?league=${league}&type=scores`).then(r => r.json()),
       fetch(`/api/sports?league=${league}&type=news`).then(r => r.json()),
     ]).then(([s, n]) => {
+      const newsItems = n.news || [];
       setGames(prev      => ({ ...prev, [league]: s.games || [] }));
-      setSportsNews(prev => ({ ...prev, [league]: n.news  || [] }));
+      setSportsNews(prev => ({ ...prev, [league]: newsItems }));
       setLoading(p => ({ ...p, sports: false }));
+      // Trigger bullets immediately after news loads — don't rely on a separate useEffect
+      if (section === "news") {
+        newsItems.slice(0, 8).forEach(item => fetchBullets(item, true));
+      }
     }).catch(() => setLoading(p => ({ ...p, sports: false })));
-  }, [tab, league]);
+  }, [tab, league, section, fetchBullets]);
 
-  // Auto-load bullets
+  // World news bullets — fires when worldNews populates or tab/filter changes
   useEffect(() => {
-    if (tab === "news" || tab === "markets") {
+    if ((tab === "news" || tab === "markets") && worldNews.length > 0) {
       const vis = catFilter === "all" ? worldNews : worldNews.filter(h => h.category === catFilter);
       vis.slice(0, 10).forEach(item => fetchBullets(item, false));
     }
-  }, [tab, catFilter, worldNews]); // eslint-disable-line
+  }, [tab, catFilter, worldNews, fetchBullets]);
 
+  // Sports news bullets — fires when sportsNews updates (switching leagues)
   useEffect(() => {
     if (tab === "sports" && section === "news") {
-      (sportsNews[league] || []).slice(0, 8).forEach(item => fetchBullets(item, true));
+      const items = sportsNews[league] || [];
+      if (items.length > 0) {
+        items.slice(0, 8).forEach(item => fetchBullets(item, true));
+      }
     }
-  }, [tab, section, league, sportsNews]); // eslint-disable-line
+  }, [tab, section, league, sportsNews, fetchBullets]);
 
   // Derived
   const activeLeague = LEAGUES.find(l => l.id === league);
