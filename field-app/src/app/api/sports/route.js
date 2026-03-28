@@ -121,11 +121,59 @@ export async function GET(request) {
   }
 }
 
+function extractPerformers(comp, leaders) {
+  // Try scoreboard leaders first
+  if (leaders?.length) {
+    const perfs = leaders.flatMap(cat => {
+      return (cat.leaders || []).slice(0, 2).map(l => ({
+        name: l.athlete?.shortName || l.athlete?.displayName || "",
+        stat: cat.shortDisplayName || cat.displayName || "",
+        value: l.displayValue || "",
+        team: l.athlete?.team?.abbreviation || "",
+      }));
+    }).filter(p => p.name && p.value);
+    if (perfs.length >= 2) return perfs.slice(0, 5);
+  }
+  // Fallback: pull from competitor leaders
+  const allLeaders = [];
+  (comp?.competitors || []).forEach(team => {
+    (team.leaders || []).forEach(cat => {
+      const l = cat.leaders?.[0];
+      if (l?.athlete) {
+        allLeaders.push({
+          name: l.athlete.shortName || l.athlete.displayName || "",
+          stat: cat.shortDisplayName || cat.displayName || "",
+          value: l.displayValue || "",
+          team: team.team?.abbreviation || "",
+        });
+      }
+    });
+  });
+  return allLeaders.filter(p => p.name && p.value).slice(0, 5);
+}
+
 async function getScores(cfg) {
   const url  = `https://site.api.espn.com/apis/site/v2/sports/${cfg.sport}/${cfg.league}/scoreboard`;
   const res  = await fetch(url, { next: { revalidate: 30 } });
   const data = await res.json();
-  const games = (data.events || []).map(ev => {
+
+  const events = data.events || [];
+
+  // For games that are live or final, fetch summaries in parallel to get real performers
+  const summaryPromises = events.map(async ev => {
+    const st = ev.status?.type;
+    const hasScore = st?.completed || st?.state === "in";
+    if (!hasScore) return null;
+    try {
+      const sUrl = `https://site.api.espn.com/apis/site/v2/sports/${cfg.sport}/${cfg.league}/summary?event=${ev.id}`;
+      const sr = await fetch(sUrl, { next: { revalidate: 30 } });
+      return await sr.json();
+    } catch { return null; }
+  });
+
+  const summaries = await Promise.all(summaryPromises);
+
+  const games = events.map((ev, idx) => {
     const comp = ev.competitions?.[0];
     const comps = comp?.competitors || [];
     const away = comps.find(c => c.homeAway === "away");
@@ -137,17 +185,45 @@ async function getScores(cfg) {
     const aS = parseInt(away?.score ?? "0");
     const hS = parseInt(home?.score ?? "0");
 
-    // Pull top performers from leaders array
-    const leaders = comp?.leaders || [];
-    const topPerformers = leaders.slice(0, 3).map(cat => {
-      const leader = cat.leaders?.[0];
-      return leader ? {
-        name: leader.athlete?.shortName || leader.athlete?.displayName || "",
-        stat: cat.displayName || "",
-        value: leader.displayValue || "",
-        team: leader.athlete?.team?.abbreviation || "",
-      } : null;
-    }).filter(Boolean);
+    // Get top performers from summary if available, else scoreboard leaders
+    let topPerformers = [];
+    const summary = summaries[idx];
+    if (summary?.boxscore?.players) {
+      // Extract from boxscore player stats
+      const allPlayers = [];
+      summary.boxscore.players.forEach(teamData => {
+        const teamAbbr = teamData.team?.abbreviation || "";
+        (teamData.statistics || []).forEach(statGroup => {
+          const labels = statGroup.labels || [];
+          const mainStatIdx = labels.findIndex(l =>
+            ["PTS","YDS","G","A","SVS","HR","RBI","AVG","SOG"].includes(l)
+          );
+          (statGroup.athletes || []).forEach(athlete => {
+            const stats = athlete.stats || [];
+            const mainVal = mainStatIdx >= 0 ? stats[mainStatIdx] : stats[0];
+            if (mainVal && mainVal !== "0" && mainVal !== "--" && athlete.athlete) {
+              allPlayers.push({
+                name: athlete.athlete.shortName || athlete.athlete.displayName || "",
+                stat: mainStatIdx >= 0 ? labels[mainStatIdx] : (labels[0] || ""),
+                value: mainVal,
+                team: teamAbbr,
+                numVal: parseFloat(mainVal) || 0,
+              });
+            }
+          });
+        });
+      });
+      // Sort by numeric value descending, take top 5
+      topPerformers = allPlayers
+        .sort((a, b) => b.numVal - a.numVal)
+        .slice(0, 5)
+        .map(({ name, stat, value, team }) => ({ name, stat, value, team }));
+    }
+
+    // Fallback to scoreboard leaders
+    if (!topPerformers.length) {
+      topPerformers = extractPerformers(comp, comp?.leaders);
+    }
 
     return {
       id: ev.id, status,
@@ -167,6 +243,7 @@ async function getScores(cfg) {
       topPerformers,
     };
   });
+
   return Response.json({ games });
 }
 

@@ -226,6 +226,69 @@ function GameModal({ game, league, onClose }) {
   );
 }
 
+// ── Top Performers Section ────────────────────────────────────
+function TopPerformersSection({ games }) {
+  // Collect all performers across all games that have scores
+  const activeGames = games.filter(g => g.status === "live" || g.status === "final");
+  if (!activeGames.length) return null;
+
+  // Build a flat list: each game's performers, grouped by game
+  const hasAny = activeGames.some(g => g.topPerformers?.length > 0);
+  if (!hasAny) return null;
+
+  return (
+    <div style={{ marginTop: 28 }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 12, marginBottom: 18 }}>
+        <div style={{ width: 3, height: 22, background: C.gold, borderRadius: 2 }} />
+        <span style={{ fontFamily: Fd, fontSize: 22, letterSpacing: "2px", color: C.text }}>TOP PERFORMERS</span>
+      </div>
+
+      <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+        {activeGames.map(game => {
+          if (!game.topPerformers?.length) return null;
+          return (
+            <div key={game.id} style={{ background: C.card, border: `1px solid ${C.border}`, borderRadius: 12, padding: "18px 22px" }}>
+              {/* Game label */}
+              <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 14 }}>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <TeamLogo logo={game.awayLogo} abbr={game.awayTeam} color={game.awayColor} size={20} />
+                  <span style={{ fontSize: 13, fontWeight: 800, color: C.textMid, fontFamily: Fb }}>{game.awayTeam}</span>
+                </div>
+                <span style={{ fontSize: 12, color: C.textDim, fontFamily: Fb }}>
+                  {game.awayScore != null ? `${game.awayScore} - ${game.homeScore}` : "vs"}
+                </span>
+                <div style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                  <TeamLogo logo={game.homeLogo} abbr={game.homeTeam} color={game.homeColor} size={20} />
+                  <span style={{ fontSize: 13, fontWeight: 800, color: C.textMid, fontFamily: Fb }}>{game.homeTeam}</span>
+                </div>
+                {game.status === "live" && (
+                  <div style={{ display: "flex", alignItems: "center", gap: 4, marginLeft: "auto" }}>
+                    <LiveDot />
+                    <span style={{ fontSize: 10, color: C.red, fontWeight: 800, fontFamily: Fb }}>{game.period}</span>
+                  </div>
+                )}
+                {game.status === "final" && <span style={{ fontSize: 10, color: C.textDim, fontFamily: Fb, marginLeft: "auto", fontWeight: 700 }}>FINAL</span>}
+              </div>
+
+              {/* Performers grid */}
+              <div style={{ display: "grid", gridTemplateColumns: "repeat(5, 1fr)", gap: 8 }}>
+                {game.topPerformers.slice(0, 5).map((p, i) => (
+                  <div key={i} style={{ background: C.surface, borderRadius: 8, padding: "12px 10px", border: `1px solid ${C.border}`, textAlign: "center" }}>
+                    <div style={{ fontSize: 22, fontWeight: 900, color: i === 0 ? C.gold : C.text, fontFamily: Fb, lineHeight: 1, marginBottom: 4 }}>{p.value}</div>
+                    <div style={{ fontSize: 9, fontWeight: 800, color: C.accentBright, fontFamily: Fb, letterSpacing: "1px", textTransform: "uppercase", marginBottom: 6 }}>{p.stat}</div>
+                    <div style={{ fontSize: 11, fontWeight: 700, color: C.text, fontFamily: Fb, marginBottom: 2 }}>{p.name}</div>
+                    <div style={{ fontSize: 10, color: C.textDim, fontFamily: Fb }}>{p.team}</div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ── Score Card — with logos + top performers ──────────────────
 function ScoreCard({ game, onSelect }) {
   const isLive  = game.status === "live";
@@ -279,21 +342,8 @@ function ScoreCard({ game, onSelect }) {
         {game.spread && <span style={{ fontSize: 10, color: C.accentBright, fontFamily: Fb, fontWeight: 600, background: C.accent + "18", padding: "2px 7px", borderRadius: 4 }}>{game.spread}</span>}
       </div>
 
-      {/* Top Performers */}
-      {game.topPerformers?.length > 0 && (
-        <div style={{ borderTop: `1px solid ${C.border}`, paddingTop: 10, display: "flex", flexDirection: "column", gap: 5 }}>
-          <div style={{ fontSize: 9, fontWeight: 800, color: C.textDim, fontFamily: Fb, letterSpacing: "1.5px", textTransform: "uppercase", marginBottom: 2 }}>Top Performers</div>
-          {game.topPerformers.slice(0, 2).map((p, i) => (
-            <div key={i} style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <span style={{ fontSize: 12, color: C.textMid, fontFamily: Fb }}>{p.name}</span>
-              <span style={{ fontSize: 12, color: C.text, fontFamily: Fb, fontWeight: 700 }}>{p.value} <span style={{ color: C.textDim, fontWeight: 400 }}>{p.stat}</span></span>
-            </div>
-          ))}
-        </div>
-      )}
-
       {/* Tap hint */}
-      <div style={{ textAlign: "center", fontSize: 10, color: C.textDim, fontFamily: Fb }}>Tap for box score →</div>
+      <div style={{ textAlign: "center", fontSize: 10, color: C.textDim, fontFamily: Fb }}>Tap for full stats →</div>
     </div>
   );
 }
@@ -472,9 +522,12 @@ export default function FieldApp() {
                   ? <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>{[1,2,3].map(i => <Skeleton key={i} h={200} />)}</div>
                   : leagueGames.length === 0
                     ? <div style={{ padding: "50px 0", textAlign: "center", color: C.textDim, fontFamily: Fb }}>No games scheduled</div>
-                    : <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
-                        {leagueGames.map(g => <ScoreCard key={g.id} game={g} onSelect={setSelectedGame} />)}
-                      </div>
+                    : <>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 12 }}>
+                          {leagueGames.map(g => <ScoreCard key={g.id} game={g} onSelect={setSelectedGame} />)}
+                        </div>
+                        <TopPerformersSection games={leagueGames} />
+                      </>
                 }
               </div>
             )}
