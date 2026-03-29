@@ -25,32 +25,43 @@ export async function POST(request) {
       userPrompt = `Sports headline: "${headline}"
 Analyze this ${type}. Respond ONLY with a valid JSON object (no markdown, no backticks, no extra text):
 {
-  "summary": "1-2 sentence plain-English summary of what happened — be specific with names, teams, numbers",
+  "summary": "2-3 sentence detailed summary of what happened — include specific player names, teams, contract values, picks exchanged, or terms involved",
   "grade": "Letter grade A+ through F rating the move for the acquiring/signing team",
-  "gradeReason": "1 sentence explaining why you gave that grade",
-  "impact": "2-3 sentences on concrete team and league impact — cap space, roster fit, playoff chances, competitive balance",
-  "context": "1-2 sentences of historical context — comparable trades/signings, franchise history, precedent"
+  "gradeReason": "2 sentences explaining the grade — what makes this good or bad, and what the team gains or loses",
+  "impact": "3-4 sentences on concrete team and league impact — roster construction, cap space implications, playoff odds shift, competitive balance in the conference, and ripple effects on other teams",
+  "context": "2-3 sentences of historical context — comparable trades/signings in value and impact, franchise history with similar moves, and how this ranks historically"
 }
-Be factual and direct. Make the grade bold — take a real position.`;
+Be factual and direct. Take a bold position on the grade.`;
     } else if (isSports) {
       userPrompt = `Sports headline: "${headline}"
 Analyze this ${type || "sports news"}. Respond ONLY with a valid JSON object (no markdown, no backticks, no extra text):
 {
-  "summary": "1-2 sentence plain-English summary of what happened — be specific with names, teams, details",
-  "impact": "2-3 sentences on how this concretely affects the team, season, and league — standings, depth, playoff implications",
-  "context": "1-2 sentences of relevant historical context or comparable situations"
+  "summary": "2-3 sentence detailed summary of what happened — include specific names, teams, and key details",
+  "impact": "3-4 sentences on how this concretely affects the team and league — roster depth, rotation changes, playoff implications, salary cap effects, and what this means for the team's title chances",
+  "context": "2-3 sentences of historical context — comparable situations, how teams have handled similar situations, and relevant franchise history"
 }
-Be factual. No opinions, no speculation. Direct and concise.`;
+Be factual and specific. No generic statements.`;
     } else {
       const catLabel = { geo: "geopolitical", markets: "economic/financial", politics: "political", tech: "technology" }[category] || "world";
-      userPrompt = `News headline: "${headline}"
-Analyze this ${catLabel} news story. Respond ONLY with a valid JSON object (no markdown, no backticks, no extra text):
+
+      const impactGuide = {
+        geo: "geopolitical and military consequences — alliance shifts, escalation risks, humanitarian effects, regional stability, diplomatic fallout",
+        markets: "economic and financial consequences — market reactions, sector impacts, trade implications, inflation/growth effects, investor sentiment",
+        politics: "political consequences — legislative impact, electoral implications, institutional changes, public opinion shifts, precedent set",
+        tech: "technology and industry consequences — competitive landscape shifts, regulatory implications, societal impact, innovation trajectory",
+      }[category] || "real-world consequences — economic, political, social, and strategic implications";
+
+      userPrompt = `World news headline: "${headline}"
+
+You are a senior geopolitical/economic analyst. This is a WORLD NEWS story, NOT sports.
+Analyze this ${catLabel} news story. Respond ONLY with a valid JSON object (no markdown, no backticks):
 {
-  "summary": "2-3 sentence plain-English summary — what happened, who's involved, what are the immediate facts",
-  "impact": "2-3 sentences on real-world impact — economic consequences, geopolitical shifts, policy effects, who wins/loses",
-  "context": "2-3 sentences of historical context — what led to this, precedents, why it matters in the bigger picture"
+  "summary": "3-5 sentence comprehensive summary — what exactly happened, who is involved, what triggered this, and what the immediate situation is. Be specific with names, dates, numbers, and locations.",
+  "impact": "3-5 sentences on ${impactGuide}. Be concrete and specific — name the countries, markets, sectors, or groups affected and explain exactly how.",
+  "context": "3-5 sentences of deep historical context — what chain of events led here, key precedents from past decades, why this moment is historically significant, and how it compares to similar past events."
 }
-Be factual, authoritative, and concise. No fluff.`;
+CRITICAL: This is world/political/economic news. Do NOT mention sports, athletes, leagues, or games. Focus entirely on geopolitics, economics, policy, and real-world consequences.
+Be authoritative, specific, and analytical. Write like a senior analyst briefing a head of state.`;
     }
 
     // Groq uses OpenAI-compatible API format
@@ -69,7 +80,7 @@ Be factual, authoritative, and concise. No fluff.`;
           body: JSON.stringify({
             model,
             temperature: 0.3,
-            max_tokens: 600,
+            max_tokens: 1000,
             messages: [
               {
                 role: "system",

@@ -232,6 +232,49 @@ async function getGameDetail(cfg, gameId) {
   const statusDetail = comp.status?.type?.shortDetail || data.header?.gameNote || "";
   const statusState = comp.status?.type?.state || "pre";
 
+  // ── Build player lookup from boxscore (for headshots in play-by-play) ──
+  const boxPlayers = data.boxscore?.players || [];
+  const playerLookup = {};
+  boxPlayers.forEach(teamData => {
+    (teamData.statistics || []).forEach(group => {
+      (group.athletes || []).forEach(a => {
+        const athlete = a.athlete || {};
+        if (!athlete.displayName && !athlete.shortName) return;
+        const athleteId = athlete.id || "";
+        const entry = {
+          name: athlete.shortName || athlete.displayName || "",
+          fullName: athlete.displayName || athlete.shortName || "",
+          headshot: athlete.headshot?.href || athlete.headshot ||
+            (athleteId ? `https://a.espn.com/combiner/i?img=/i/headshots/${cfg.sport}/players/full/${athleteId}.png&w=96&h=70&cb=1` : ""),
+          jersey: athlete.jersey || "",
+          position: athlete.position?.abbreviation || "",
+          team: teamData.team?.abbreviation || "",
+        };
+        // Index by multiple name variants for matching
+        if (athlete.shortName) playerLookup[athlete.shortName.toLowerCase()] = entry;
+        if (athlete.displayName) playerLookup[athlete.displayName.toLowerCase()] = entry;
+        // Also index by last name for partial matching
+        const lastName = (athlete.displayName || "").split(" ").pop();
+        if (lastName && lastName.length > 2) playerLookup[lastName.toLowerCase()] = entry;
+      });
+    });
+  });
+
+  // Helper: find player in text using lookup
+  function findPlayerInText(text) {
+    if (!text) return null;
+    const lower = text.toLowerCase();
+    // Try full short names first (most specific)
+    for (const [key, val] of Object.entries(playerLookup)) {
+      if (key.includes(" ") && lower.includes(key)) return val;
+    }
+    // Then try last names
+    for (const [key, val] of Object.entries(playerLookup)) {
+      if (!key.includes(" ") && key.length > 2 && lower.includes(key)) return val;
+    }
+    return null;
+  }
+
   // ── Play-by-play ──
   const rawPlays = data.plays || [];
   const plays = rawPlays.slice(-80).reverse().map(p => {
@@ -241,7 +284,7 @@ async function getGameDetail(cfg, gameId) {
     const teamLogo = isHome ? homeTeam.logo : awayTeam.logo;
 
     // Extract participants (players involved in the play)
-    const participants = (p.participants || []).map(part => {
+    let participants = (p.participants || []).map(part => {
       const athlete = part.athlete || {};
       const athleteId = athlete.id || "";
       return {
@@ -252,6 +295,22 @@ async function getGameDetail(cfg, gameId) {
         position: athlete.position?.abbreviation || "",
       };
     }).filter(p => p.name);
+
+    // Fallback: if no participants from the API, try to find the player from play text
+    if (participants.length === 0) {
+      const found = findPlayerInText(p.text || p.shortText || "");
+      if (found) {
+        participants = [found];
+      }
+    }
+
+    // Ensure headshots are filled from lookup even if API gave name but no photo
+    participants = participants.map(part => {
+      if (part.headshot) return part;
+      const looked = playerLookup[part.name.toLowerCase()];
+      if (looked?.headshot) return { ...part, headshot: looked.headshot };
+      return part;
+    });
 
     // Determine play type for visual treatment
     const typeText = (p.type?.text || "").toLowerCase();
@@ -297,8 +356,7 @@ async function getGameDetail(cfg, gameId) {
     })),
   }));
 
-  // ── Player box scores with headshots ──
-  const boxPlayers = data.boxscore?.players || [];
+  // ── Player box scores with headshots (reuse boxPlayers from above) ──
   const rosterData = boxPlayers.map(teamData => {
     const teamAbbr = teamData.team?.abbreviation || "";
     const teamLogo = teamData.team?.logo || "";

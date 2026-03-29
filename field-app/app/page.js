@@ -630,7 +630,7 @@ function AnalysisPanel({ analysis, loading, type }) {
 
       {impact ? <div>
         <div style={{ fontSize:11, fontWeight:800, color:C.orange, fontFamily:Fb, letterSpacing:"1.5px", marginBottom:6, textTransform:"uppercase" }}>
-          {["trade","injury","signing","roster","news","award","storyline"].includes(type) ? "Team & League Impact" : "World Impact"}
+          {type === "geo" ? "Geopolitical Impact" : type === "markets" ? "Economic Impact" : type === "politics" ? "Political Impact" : type === "tech" ? "Tech & Industry Impact" : ["trade","injury","signing","roster","news","award","storyline"].includes(type) ? "Team & League Impact" : "World Impact"}
         </div>
         <div style={{ fontSize:14, color:C.textMid, fontFamily:Fb, lineHeight:1.55 }}>{impact}</div>
       </div> : null}
@@ -734,7 +734,10 @@ export default function FieldApp() {
   const [loading, setLoading] = useState({ news:true, sports:true });
 
   useEffect(() => {
-    fetch("/api/news").then(r=>r.json()).then(d=>{setWorldNews(d.articles||[]);setLoading(p=>({...p,news:false}));}).catch(()=>setLoading(p=>({...p,news:false})));
+    const loadNews = () => fetch("/api/news").then(r=>r.json()).then(d=>{setWorldNews(d.articles||[]);setLoading(p=>({...p,news:false}));}).catch(()=>setLoading(p=>({...p,news:false})));
+    loadNews();
+    const t = setInterval(loadNews, 60000); // Refresh news every 60 seconds
+    return () => clearInterval(t);
   }, []);
 
   useEffect(() => {
