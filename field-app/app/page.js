@@ -588,6 +588,7 @@ export default function FieldApp() {
   const [catFilter, setCatFilter] = useState("all");
   const [gameFilter, setGameFilter] = useState("all");
   const [selectedGame, setSelectedGame] = useState(null);
+  const [scoreDate, setScoreDate] = useState(new Date()); // Date navigation
 
   const [worldNews, setWorldNews] = useState([]);
   const [sportsNews, setSportsNews] = useState({});
@@ -607,15 +608,18 @@ export default function FieldApp() {
   useEffect(() => {
     if (tab !== "sports") return;
     setLoading(p => ({ ...p, sports:true }));
+    const d = scoreDate;
+    const dateStr = d.getFullYear() + String(d.getMonth()+1).padStart(2,"0") + String(d.getDate()).padStart(2,"0");
+    const cacheKey = league + "_" + dateStr;
     Promise.all([
-      fetch("/api/sports?league="+league+"&type=scores").then(r=>r.json()),
+      fetch("/api/sports?league="+league+"&type=scores&date="+dateStr).then(r=>r.json()),
       fetch("/api/sports?league="+league+"&type=news").then(r=>r.json()),
     ]).then(([s,n]) => {
-      setGames(prev => ({ ...prev, [league]: s.games || [] }));
+      setGames(prev => ({ ...prev, [cacheKey]: s.games || [] }));
       setSportsNews(prev => ({ ...prev, [league]: n.news || [] }));
       setLoading(p => ({ ...p, sports:false }));
     }).catch(() => setLoading(p => ({ ...p, sports:false })));
-  }, [tab, league]);
+  }, [tab, league, scoreDate]);
 
   // If a game is selected, show the full game detail page
   if (selectedGame) {
@@ -623,9 +627,11 @@ export default function FieldApp() {
   }
 
   const activeLeague = LEAGUES.find(l => l.id === league);
-  const leagueGames = (games[league]||[]).filter(g => gameFilter==="all" || g.status===gameFilter);
+  const scoreDateStr = scoreDate.getFullYear() + String(scoreDate.getMonth()+1).padStart(2,"0") + String(scoreDate.getDate()).padStart(2,"0");
+  const gameCacheKey = league + "_" + scoreDateStr;
+  const leagueGames = (games[gameCacheKey]||[]).filter(g => gameFilter==="all" || g.status===gameFilter);
   const leagueNews = sportsNews[league] || [];
-  const liveCount = (games[league]||[]).filter(g => g.status==="live").length;
+  const liveCount = (games[gameCacheKey]||[]).filter(g => g.status==="live").length;
   const visWorld = catFilter==="all" ? worldNews : worldNews.filter(h => h.category===catFilter);
   const topWorld = visWorld.filter(h => h.rank).sort((a,b) => a.rank-b.rank);
   const moreWorld = visWorld.filter(h => !h.rank);
@@ -695,6 +701,28 @@ export default function FieldApp() {
 
             {section==="scores" && (
               <div>
+                {/* Date navigation */}
+                <div style={{ display:"flex", alignItems:"center", justifyContent:"center", gap:8, marginBottom:20 }}>
+                  <button onClick={() => setScoreDate(d => { const n=new Date(d); n.setDate(n.getDate()-1); return n; })} style={{ background:C.card, border:"1px solid "+C.border, borderRadius:8, padding:"8px 14px", color:C.textMid, cursor:"pointer", fontSize:16, fontFamily:Fb, fontWeight:700 }}>{"\u2190"}</button>
+                  {[-2,-1,0,1,2].map(offset => {
+                    const d = new Date(); d.setDate(d.getDate() + offset);
+                    const dStr = d.getFullYear() + String(d.getMonth()+1).padStart(2,"0") + String(d.getDate()).padStart(2,"0");
+                    const isActive = scoreDateStr === dStr;
+                    const isToday = offset === 0;
+                    const label = isToday ? "Today" : d.toLocaleDateString("en-US", { weekday:"short", month:"short", day:"numeric" });
+                    return (
+                      <button key={offset} onClick={() => setScoreDate(new Date(d))} style={{
+                        background: isActive ? C.accent+"25" : C.card,
+                        border: "1px solid " + (isActive ? C.accent : C.border),
+                        borderRadius: 8, padding: "8px 16px", cursor: "pointer",
+                        color: isActive ? C.accentBright : C.textMid,
+                        fontSize: 13, fontFamily: Fb, fontWeight: isActive ? 700 : 500,
+                        whiteSpace: "nowrap", transition: "all 0.15s",
+                      }}>{label}</button>
+                    );
+                  })}
+                  <button onClick={() => setScoreDate(d => { const n=new Date(d); n.setDate(n.getDate()+1); return n; })} style={{ background:C.card, border:"1px solid "+C.border, borderRadius:8, padding:"8px 14px", color:C.textMid, cursor:"pointer", fontSize:16, fontFamily:Fb, fontWeight:700 }}>{"\u2192"}</button>
+                </div>
                 <div style={{ display:"flex", gap:10, marginBottom:22, flexWrap:"wrap" }}>
                   {["all","live","upcoming","final"].map(v => (
                     <Pill key={v} active={gameFilter===v} onClick={() => setGameFilter(v)}>

@@ -82,12 +82,13 @@ export async function GET(request) {
   const league = searchParams.get("league") || "nba";
   const type   = searchParams.get("type")   || "scores";
   const gameId = searchParams.get("gameId") || null;
+  const date   = searchParams.get("date")   || null; // YYYYMMDD format
   const cfg    = ESPN[league];
   if (!cfg) return Response.json({ games: [], news: [] });
   try {
     if (type === "news") return getNews(cfg, league);
     if (type === "detail" && gameId) return getGameDetail(cfg, gameId);
-    return getScores(cfg);
+    return getScores(cfg, date);
   } catch (e) {
     console.error("ESPN error", e);
     return Response.json({ games: [], news: [] });
@@ -123,8 +124,9 @@ function extractPerformers(comp, leaders) {
   return allLeaders.filter(p => p.name && p.value).slice(0, 5);
 }
 
-async function getScores(cfg) {
-  const url  = `https://site.api.espn.com/apis/site/v2/sports/${cfg.sport}/${cfg.league}/scoreboard`;
+async function getScores(cfg, date) {
+  let url = `https://site.api.espn.com/apis/site/v2/sports/${cfg.sport}/${cfg.league}/scoreboard`;
+  if (date) url += `?dates=${date}`;
   const res  = await fetch(url, { next: { revalidate: 30 } });
   const data = await res.json();
   const events = data.events || [];

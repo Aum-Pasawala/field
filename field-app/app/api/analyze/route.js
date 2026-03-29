@@ -49,23 +49,46 @@ Analyze this ${catLabel} news story. Respond ONLY with a valid JSON object (no m
 Be factual, authoritative, and concise. Write like a senior analyst at a think tank. No fluff.`;
     }
 
-    const res = await fetch("https://api.anthropic.com/v1/messages", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "x-api-key": key,
-        "anthropic-version": "2023-06-01",
-      },
-      body: JSON.stringify({
-        model: "claude-haiku-4-5-20251001",
-        max_tokens: 600,
-        system: "You are a senior analyst. Always return valid JSON only — no markdown, no backticks, no preamble.",
-        messages: [{ role: "user", content: prompt }],
-      }),
-    });
+    // Try the API call — attempt with claude-haiku-4-5-20251001, fallback to claude-3-haiku-20240307
+    let res;
+    let lastError = "";
 
-    if (!res.ok) {
-      return Response.json({ summary: "AI analysis could not reach the server. Check your API key in Vercel settings." });
+    for (const model of ["claude-haiku-4-5-20251001", "claude-3-haiku-20240307"]) {
+      try {
+        res = await fetch("https://api.anthropic.com/v1/messages", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            "x-api-key": key,
+            "anthropic-version": "2023-06-01",
+          },
+          body: JSON.stringify({
+            model,
+            max_tokens: 600,
+            system: "You are a senior analyst. Always return valid JSON only — no markdown, no backticks, no preamble.",
+            messages: [{ role: "user", content: prompt }],
+          }),
+        });
+
+        if (res.ok) break; // Success — stop trying
+
+        // Read the error body for debugging
+        const errBody = await res.text().catch(() => "");
+        lastError = "HTTP " + res.status + " with model " + model + ": " + errBody.slice(0, 200);
+        console.error("Analyze API error:", lastError);
+        res = null; // Mark as failed so we try next model
+      } catch (fetchErr) {
+        lastError = "Fetch failed for " + model + ": " + fetchErr.message;
+        console.error("Analyze fetch error:", lastError);
+        res = null;
+      }
+    }
+
+    if (!res || !res.ok) {
+      // All models failed — return the demo analysis with the error appended
+      const demo = getDemoAnalysis(headline, type, category);
+      demo.summary = "API Error: " + lastError.slice(0, 150) + ". Showing placeholder analysis below.";
+      return Response.json(demo);
     }
 
     const data = await res.json();
