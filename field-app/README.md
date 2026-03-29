@@ -31,7 +31,7 @@ git push -u origin main
 
 | Variable | Required | Source |
 |---|---|---|
-| `ANTHROPIC_API_KEY` | For AI analysis | [console.anthropic.com](https://console.anthropic.com) |
+| `GROQ_API_KEY` | For AI analysis (FREE) | [console.groq.com](https://console.groq.com) |
 | `NEWS_API_KEY` | For live news | [newsapi.org](https://newsapi.org) |
 
 5. Click **Deploy**
@@ -55,7 +55,7 @@ Open [http://localhost:3000](http://localhost:3000).
 
 - **Next.js 14** (App Router)
 - **React 18**
-- **Claude Haiku 4.5** (AI analysis)
+- **Groq + Llama 4 Scout** (AI analysis — FREE)
 - **ESPN API** (sports data)
 - **Yahoo Finance API** (market data)
 - **NewsAPI** (world news)
