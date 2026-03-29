@@ -102,10 +102,18 @@ function GameDetailPage({ game, league, onBack }) {
 
   useEffect(() => {
     setLoading(true);
-    fetch("/api/sports?league=" + league + "&type=detail&gameId=" + game.id)
-      .then(r => r.json())
-      .then(d => { setDetail(d); setLoading(false); })
-      .catch(() => setLoading(false));
+    const doFetch = () => {
+      fetch("/api/sports?league=" + league + "&type=detail&gameId=" + game.id)
+        .then(r => r.json())
+        .then(d => { setDetail(d); setLoading(false); })
+        .catch(() => setLoading(false));
+    };
+    doFetch();
+    // Auto-refresh every 15s if game is live
+    if (game.status === "live") {
+      const iv = setInterval(doFetch, 15000);
+      return () => clearInterval(iv);
+    }
   }, [game.id, league]);
 
   const away = detail?.awayTeam || {};
@@ -159,18 +167,21 @@ function GameDetailPage({ game, league, onBack }) {
         {/* Tabs */}
         <div style={{ display:"flex", borderBottom:"1px solid "+C.border, marginBottom:24 }}>
           {[
-            { id:"plays", label:"Plays" },
-            { id:"stats", label:"Stats" },
+            { id:"plays", label:"\u{1F4CB} Feed" },
+            { id:"stats", label:"\u{1F4CA} Game" },
             { id:"away", label:game.awayTeam },
             { id:"home", label:game.homeTeam },
-          ].map(t => (
+          ].map(t => {
+            const isTeamTab = t.id === "away" || t.id === "home";
+            const teamColor = t.id === "away" ? game.awayColor : t.id === "home" ? game.homeColor : C.accent;
+            return (
             <button key={t.id} onClick={() => setTab(t.id)} style={{
               flex:1, padding:"14px 8px", border:"none", background:"none", cursor:"pointer",
-              fontSize:14, fontWeight:tab===t.id?800:500, color:tab===t.id?C.text:C.textMid,
-              borderBottom:tab===t.id?"3px solid "+C.accent:"3px solid transparent",
+              fontSize:14, fontWeight:tab===t.id?800:500, color:tab===t.id?(isTeamTab?teamColor:C.text):C.textMid,
+              borderBottom:tab===t.id?"3px solid "+(isTeamTab?teamColor:C.accent):"3px solid transparent",
               fontFamily:Fb, transition:"all 0.15s", letterSpacing:"0.5px",
             }}>{t.label}</button>
-          ))}
+          )})}
         </div>
 
         {loading ? (
@@ -183,30 +194,156 @@ function GameDetailPage({ game, league, onBack }) {
               <div style={{ display:"flex", flexDirection:"column", gap:0 }}>
                 {plays.length === 0 ? (
                   <div style={{ padding:"60px 0", textAlign:"center", color:C.textDim, fontFamily:Fb }}>No play-by-play available yet</div>
-                ) : plays.map((p, i) => (
-                  <div key={p.id || i} style={{
-                    padding:"14px 18px",
-                    background: p.scoringPlay ? (p.isHome ? home.color+"12" : away.color+"12") : "transparent",
-                    borderLeft: p.scoringPlay ? "3px solid "+(p.isHome?home.color||C.green:away.color||C.orange) : "3px solid "+C.border,
-                    borderBottom:"1px solid "+C.border+"80",
-                  }}>
-                    <div style={{ display:"flex", justifyContent:"space-between", alignItems:"flex-start", gap:12 }}>
-                      <div style={{ flex:1 }}>
-                        <div style={{ fontSize:14, color:p.scoringPlay?C.text:C.textMid, fontFamily:Fb, fontWeight:p.scoringPlay?600:400, lineHeight:1.5 }}>
-                          {p.text || p.shortText}
-                        </div>
+                ) : (() => {
+                  let lastPeriod = null;
+                  return plays.map((p, i) => {
+                    const showPeriodDivider = p.period && p.period !== lastPeriod;
+                    lastPeriod = p.period;
+                    const mainPlayer = p.participants?.[0];
+                    const assistPlayer = p.participants?.[1];
+                    const isPeriodMarker = p.playCategory === "period";
+                    const isTimeout = p.playCategory === "timeout";
+                    const isSub = p.playCategory === "sub";
+                    const isTurnover = p.playCategory === "turnover";
+                    const isFoul = p.playCategory === "foul";
+                    const isScoring = p.scoringPlay;
+                    const teamColor = p.teamColor || C.borderBright;
+
+                    return (
+                      <div key={p.id || i}>
+                        {/* Period divider */}
+                        {showPeriodDivider && (
+                          <div style={{ padding:"14px 0", display:"flex", alignItems:"center", gap:12 }}>
+                            <div style={{ flex:1, height:1, background:C.borderBright }} />
+                            <span style={{ fontSize:13, fontWeight:800, color:C.accentBright, fontFamily:Fb, letterSpacing:"2px", textTransform:"uppercase" }}>
+                              {p.periodText || ("Q" + p.period)}
+                            </span>
+                            <div style={{ flex:1, height:1, background:C.borderBright }} />
+                          </div>
+                        )}
+
+                        {/* Period start/end markers */}
+                        {isPeriodMarker ? (
+                          <div style={{ padding:"10px 18px", textAlign:"center" }}>
+                            <span style={{ fontSize:12, color:C.textDim, fontFamily:Fb, fontWeight:600, letterSpacing:"1px" }}>{p.text}</span>
+                          </div>
+                        ) : isTimeout ? (
+                          /* Timeout */
+                          <div style={{ padding:"10px 18px", display:"flex", alignItems:"center", justifyContent:"center", gap:8 }}>
+                            <span style={{ fontSize:11, fontWeight:700, color:C.textDim, fontFamily:Fb, letterSpacing:"1px", textTransform:"uppercase", background:C.surface, padding:"4px 12px", borderRadius:4, border:"1px solid "+C.border }}>
+                              {"\u23F8"} {p.text || "Timeout"}
+                            </span>
+                          </div>
+                        ) : isSub ? (
+                          /* Substitution — minimal */
+                          <div style={{ padding:"6px 18px", display:"flex", alignItems:"center", gap:8 }}>
+                            <span style={{ fontSize:12, color:C.textDim, fontFamily:Fb }}>{"\u{1F504}"} {p.shortText || p.text}</span>
+                          </div>
+                        ) : isScoring ? (
+                          /* ── SCORING PLAY — the big one ── */
+                          <div style={{
+                            margin:"6px 0",
+                            background: teamColor + "12",
+                            border:"1px solid " + teamColor + "30",
+                            borderRadius:12,
+                            overflow:"hidden",
+                          }}>
+                            {/* Score bar at top */}
+                            <div style={{ height:3, background:"linear-gradient(90deg, "+teamColor+"80, "+teamColor+"20, transparent)" }} />
+                            <div style={{ padding:"16px 18px" }}>
+                              <div style={{ display:"flex", gap:14, alignItems:"flex-start" }}>
+                                {/* Player headshot */}
+                                {mainPlayer ? (
+                                  <PlayerHeadshot src={mainPlayer.headshot} name={mainPlayer.name} color={teamColor} />
+                                ) : p.teamLogo ? (
+                                  <TeamLogo logo={p.teamLogo} abbr={p.teamAbbr} color={teamColor} size={40} />
+                                ) : null}
+
+                                <div style={{ flex:1, minWidth:0 }}>
+                                  {/* Play type badge + score value */}
+                                  <div style={{ display:"flex", alignItems:"center", gap:8, marginBottom:6 }}>
+                                    <span style={{ fontSize:11, fontWeight:800, color:teamColor, fontFamily:Fb, letterSpacing:"1px", textTransform:"uppercase" }}>
+                                      {p.scoreValue === 3 ? "THREE" : p.scoreValue === 2 ? "BUCKET" : p.scoreValue === 1 ? "FREE THROW" : p.type || "SCORE"}
+                                    </span>
+                                    {p.scoreValue > 0 && (
+                                      <span style={{ fontSize:11, fontWeight:800, color:teamColor, fontFamily:Fb, background:teamColor+"20", padding:"2px 8px", borderRadius:4 }}>
+                                        +{p.scoreValue}
+                                      </span>
+                                    )}
+                                  </div>
+
+                                  {/* Play description */}
+                                  <div style={{ fontSize:15, color:C.text, fontFamily:Fb, fontWeight:600, lineHeight:1.45, marginBottom:4 }}>
+                                    {p.shortText || p.text}
+                                  </div>
+
+                                  {/* Player details */}
+                                  {mainPlayer && (
+                                    <div style={{ display:"flex", alignItems:"center", gap:8, flexWrap:"wrap" }}>
+                                      <span style={{ fontSize:13, color:C.text, fontFamily:Fb, fontWeight:700 }}>{mainPlayer.name}</span>
+                                      {mainPlayer.jersey && <span style={{ fontSize:11, color:C.textDim, fontFamily:Fb }}>#{mainPlayer.jersey}</span>}
+                                      {assistPlayer && (
+                                        <span style={{ fontSize:12, color:C.textMid, fontFamily:Fb }}>
+                                          {"\u00B7"} assist: <span style={{ fontWeight:600, color:C.text }}>{assistPlayer.name}</span>
+                                        </span>
+                                      )}
+                                    </div>
+                                  )}
+                                </div>
+
+                                {/* Score */}
+                                <div style={{ textAlign:"right", flexShrink:0 }}>
+                                  <div style={{ fontSize:20, fontWeight:900, color:C.text, fontFamily:Fd, letterSpacing:"1px" }}>
+                                    {p.awayScore != null ? p.awayScore + "-" + p.homeScore : ""}
+                                  </div>
+                                  <div style={{ fontSize:11, color:C.textDim, fontFamily:Fb, marginTop:2 }}>
+                                    {p.clock}
+                                  </div>
+                                </div>
+                              </div>
+                            </div>
+                          </div>
+                        ) : (
+                          /* ── Non-scoring play ── */
+                          <div style={{
+                            padding:"10px 18px",
+                            borderLeft:"3px solid " + (isTurnover ? C.red+"50" : isFoul ? C.orange+"50" : C.border+"60"),
+                            borderBottom:"1px solid " + C.border + "40",
+                            display:"flex",
+                            gap:12,
+                            alignItems:"center",
+                          }}>
+                            {/* Small team logo or player pic */}
+                            {mainPlayer?.headshot ? (
+                              <img src={mainPlayer.headshot} alt={mainPlayer.name} width={28} height={28}
+                                style={{ borderRadius:"50%", objectFit:"cover", border:"1px solid "+C.border, flexShrink:0 }}
+                                onError={e => { e.target.style.display="none"; }} />
+                            ) : p.teamLogo ? (
+                              <img src={p.teamLogo} alt={p.teamAbbr} width={20} height={20}
+                                style={{ objectFit:"contain", flexShrink:0, opacity:0.5 }}
+                                onError={e => { e.target.style.display="none"; }} />
+                            ) : (
+                              <div style={{ width:20, flexShrink:0 }} />
+                            )}
+
+                            <div style={{ flex:1, minWidth:0 }}>
+                              <span style={{ fontSize:13, color:isTurnover?C.red:isFoul?C.orange:C.textMid, fontFamily:Fb, fontWeight:isTurnover||isFoul?600:400, lineHeight:1.45 }}>
+                                {p.shortText || p.text}
+                              </span>
+                            </div>
+
+                            <div style={{ textAlign:"right", flexShrink:0 }}>
+                              {p.awayScore != null && (
+                                <span style={{ fontSize:13, color:C.textDim, fontFamily:Fb, fontWeight:600 }}>{p.awayScore}-{p.homeScore}</span>
+                              )}
+                              {p.clock && <div style={{ fontSize:11, color:C.textDim+"80", fontFamily:Fb }}>{p.clock}</div>}
+                            </div>
+                          </div>
+                        )}
                       </div>
-                      <div style={{ textAlign:"right", flexShrink:0 }}>
-                        <div style={{ fontSize:16, fontWeight:800, color:C.text, fontFamily:Fb, letterSpacing:"0.5px" }}>
-                          {p.awayScore != null ? p.awayScore + " - " + p.homeScore : ""}
-                        </div>
-                        <div style={{ fontSize:11, color:C.textDim, fontFamily:Fb }}>
-                          {p.clock ? (p.period ? "Q"+p.period+" "+p.clock : p.clock) : ""}
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                ))}
+                    );
+                  });
+                })()}
               </div>
             )}
 

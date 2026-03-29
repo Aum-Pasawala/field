@@ -234,8 +234,36 @@ async function getGameDetail(cfg, gameId) {
 
   // ── Play-by-play ──
   const rawPlays = data.plays || [];
-  const plays = rawPlays.slice(-60).reverse().map(p => {
+  const plays = rawPlays.slice(-80).reverse().map(p => {
     const isHome = p.team?.id === homeTeam.id;
+    const teamAbbr = isHome ? homeTeam.abbr : (p.team?.id ? awayTeam.abbr : "");
+    const teamColor = isHome ? homeTeam.color : awayTeam.color;
+    const teamLogo = isHome ? homeTeam.logo : awayTeam.logo;
+
+    // Extract participants (players involved in the play)
+    const participants = (p.participants || []).map(part => {
+      const athlete = part.athlete || {};
+      const athleteId = athlete.id || "";
+      return {
+        name: athlete.shortName || athlete.displayName || "",
+        headshot: athlete.headshot?.href || athlete.headshot ||
+          (athleteId ? `https://a.espn.com/combiner/i?img=/i/headshots/${cfg.sport}/players/full/${athleteId}.png&w=96&h=70&cb=1` : ""),
+        jersey: athlete.jersey || "",
+        position: athlete.position?.abbreviation || "",
+      };
+    }).filter(p => p.name);
+
+    // Determine play type for visual treatment
+    const typeText = (p.type?.text || "").toLowerCase();
+    let playCategory = "other";
+    if (p.scoringPlay) playCategory = "scoring";
+    else if (typeText.includes("rebound")) playCategory = "rebound";
+    else if (typeText.includes("turnover") || typeText.includes("steal")) playCategory = "turnover";
+    else if (typeText.includes("foul")) playCategory = "foul";
+    else if (typeText.includes("timeout")) playCategory = "timeout";
+    else if (typeText.includes("substitution")) playCategory = "sub";
+    else if (typeText.includes("end") || typeText.includes("start")) playCategory = "period";
+
     return {
       id: p.id || Math.random().toString(36),
       text: p.text || "",
@@ -243,11 +271,17 @@ async function getGameDetail(cfg, gameId) {
       awayScore: p.awayScore ?? null,
       homeScore: p.homeScore ?? null,
       period: p.period?.number || null,
+      periodText: p.period?.displayValue || "",
       clock: p.clock?.displayValue || "",
-      teamId: p.team?.id || null,
+      teamAbbr,
+      teamColor,
+      teamLogo,
       isHome,
       scoringPlay: p.scoringPlay || false,
+      scoreValue: p.scoreValue || 0,
       type: p.type?.text || "",
+      playCategory,
+      participants,
     };
   });
 
