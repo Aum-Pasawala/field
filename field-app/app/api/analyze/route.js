@@ -1,11 +1,13 @@
 export async function POST(request) {
   try {
-    const { headline, type, category } = await request.json();
+    const body = await request.json().catch(() => ({}));
+    const headline = body.headline || "";
+    const type = body.type || "news";
+    const category = body.category || null;
     const key = process.env.ANTHROPIC_API_KEY;
 
     if (!key || key === "your_anthropic_key_here") {
-      // Return demo analysis when no key is set
-      return Response.json(getDemoAnalysis(type, category));
+      return Response.json(getDemoAnalysis(headline, type, category));
     }
 
     const isTrade   = type === "trade";
@@ -36,14 +38,7 @@ Analyze this ${type || "sports news"}. Respond ONLY with a valid JSON object (no
 }
 Be factual. No opinions, no speculation. Direct and concise.`;
     } else {
-      // World/political/economic/tech news
-      const catLabel = {
-        geo: "geopolitical",
-        markets: "economic/financial",
-        politics: "political",
-        tech: "technology",
-      }[category] || "world";
-
+      const catLabel = { geo: "geopolitical", markets: "economic/financial", politics: "political", tech: "technology" }[category] || "world";
       prompt = `News headline: "${headline}"
 Analyze this ${catLabel} news story. Respond ONLY with a valid JSON object (no markdown, no backticks):
 {
@@ -64,26 +59,48 @@ Be factual, authoritative, and concise. Write like a senior analyst at a think t
       body: JSON.stringify({
         model: "claude-haiku-4-5-20251001",
         max_tokens: 600,
-        system: "You are a senior analyst providing factual, authoritative analysis. Always return valid JSON only — no markdown, no backticks, no preamble, no trailing text. Be direct and take clear positions when grading.",
+        system: "You are a senior analyst. Always return valid JSON only — no markdown, no backticks, no preamble.",
         messages: [{ role: "user", content: prompt }],
       }),
     });
 
+    if (!res.ok) {
+      return Response.json({ summary: "AI analysis could not reach the server. Check your API key in Vercel settings." });
+    }
+
     const data = await res.json();
-    const raw  = data.content?.map(c => c.text || "").join("") || "{}";
+    const raw = (data.content || []).map(c => c.text || "").join("") || "";
+
+    if (!raw || raw.length < 5) {
+      return Response.json({ summary: "AI returned an empty response. The headline may be too short to analyze." });
+    }
+
     const cleaned = raw.replace(/```json|```/g, "").trim();
-    const analysis = JSON.parse(cleaned);
+
+    let analysis;
+    try {
+      analysis = JSON.parse(cleaned);
+    } catch {
+      // If JSON parse fails, use the raw text as the summary
+      return Response.json({ summary: cleaned.slice(0, 500) });
+    }
+
+    // Validate that we got at least one useful field
+    if (!analysis || typeof analysis !== "object") {
+      return Response.json({ summary: "AI response was not in expected format." });
+    }
+    if (!analysis.summary && !analysis.impact && !analysis.context) {
+      return Response.json({ summary: JSON.stringify(analysis).slice(0, 500) });
+    }
 
     return Response.json(analysis);
   } catch (e) {
     console.error("Analyze error:", e);
-    return Response.json({
-      summary: "Analysis temporarily unavailable. Try again in a moment.",
-    });
+    return Response.json({ summary: "Analysis temporarily unavailable." });
   }
 }
 
-function getDemoAnalysis(type, category) {
+function getDemoAnalysis(headline, type, category) {
   const isTrade   = type === "trade";
   const isSigning = type === "signing";
   const showGrade = isTrade || isSigning;
@@ -91,23 +108,23 @@ function getDemoAnalysis(type, category) {
 
   if (isSports && showGrade) {
     return {
-      summary: "Add your ANTHROPIC_API_KEY in Vercel → Settings → Environment Variables to get real-time AI analysis for every headline.",
+      summary: "Connect your Anthropic API key in Vercel environment variables to get real-time AI trade grades and analysis for every headline.",
       grade: "?",
       gradeReason: "AI grading activates once your API key is connected.",
-      impact: "Once enabled, Claude will analyze every trade and signing — grading the move, breaking down roster fit, cap implications, and competitive impact.",
-      context: "Analysis includes historical comparisons to similar moves and franchise precedent.",
+      impact: "Claude will analyze every trade and signing with roster fit, cap implications, and competitive impact breakdowns.",
+      context: "Historical comparisons to similar moves and franchise precedent are generated automatically.",
     };
   }
   if (isSports) {
     return {
-      summary: "Add your ANTHROPIC_API_KEY in Vercel → Settings → Environment Variables to unlock AI analysis.",
-      impact: "Claude will provide real-time impact analysis for every sports headline — team depth, playoff implications, and league-wide effects.",
-      context: "Historical context and comparable situations are generated automatically for every story.",
+      summary: "Connect your Anthropic API key in Vercel environment variables to unlock live AI analysis for every sports headline.",
+      impact: "Claude generates real-time impact analysis — team depth changes, playoff implications, and league-wide ripple effects.",
+      context: "Each story is placed in historical context with comparable situations and franchise precedent.",
     };
   }
   return {
-    summary: "Add your ANTHROPIC_API_KEY in Vercel → Settings → Environment Variables for AI-powered news analysis.",
-    impact: "Claude analyzes every headline for real-world economic, geopolitical, and social consequences — who wins, who loses, and what changes.",
-    context: "Every story gets historical context: what led to this moment, relevant precedents, and why it matters in the bigger picture.",
+    summary: "Connect your Anthropic API key in Vercel environment variables for AI-powered news analysis on every headline.",
+    impact: "Claude breaks down every story for economic, geopolitical, and social consequences — who wins, who loses, and what changes.",
+    context: "Every story gets historical context: what led here, relevant precedents, and why it matters in the bigger picture.",
   };
 }
